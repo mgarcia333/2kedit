@@ -45,6 +45,7 @@ interface ProjectStore extends ProjectState {
   // Playback
   setCurrentTime: (time: number) => void
   setPlaying: (playing: boolean) => void
+  setIsBuffering: (buffering: boolean) => void
   setDuration: (duration: number) => void
 
   // Selection
@@ -117,6 +118,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   duration: 0,
   selectedClipIds: [],
   isPlaying: false,
+  isBuffering: false,
   exportSettings: DEFAULT_EXPORT_SETTINGS,
   aspectRatio: 'original',
   timelineZoom: 1,
@@ -142,10 +144,16 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         audio: state.timeline.audio.filter(c => c.sourceClipId !== id),
         text: state.timeline.text,
       }
+      // IDs of clips that were deleted
+      const deletedIds = [
+        ...state.timeline.video.filter(c => c.sourceClipId === id).map(c => c.id),
+        ...state.timeline.audio.filter(c => c.sourceClipId === id).map(c => c.id)
+      ]
       return {
         clips: state.clips.filter(c => c.id !== id),
         timeline: newTimeline,
         duration: computeTimelineDuration(newTimeline),
+        selectedClipIds: state.selectedClipIds.filter(cid => !deletedIds.includes(cid)),
       }
     })
   },
@@ -380,12 +388,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   // Playback
-  setCurrentTime: (time) => set({ currentTime: time }),
+  setCurrentTime: (time) => set(state => ({ currentTime: Math.max(0, Math.min(state.duration, time)) })),
   setPlaying: (playing) => set({ isPlaying: playing }),
-  setDuration: (duration) => set({ duration }),
-
-  // Selection
-  setSelectedClipIds: (ids) => set({ selectedClipIds: ids }),
+  setIsBuffering: (buffering) => set({ isBuffering: buffering }),
+  setDuration: (duration) => set({ duration: Math.max(0, duration) }), setSelectedClipIds: (ids) => set({ selectedClipIds: ids }),
   toggleSelectedClipId: (id, multi) => set(state => {
     if (!multi) return { selectedClipIds: [id] }
     if (state.selectedClipIds.includes(id)) {

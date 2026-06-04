@@ -1,4 +1,4 @@
-import { useEffect, useRef, useCallback, useMemo } from 'react'
+import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
 import type { Effect } from '../types/project'
 
@@ -86,8 +86,42 @@ function buildCSSStyle(effects: Effect[]): {
     playbackRate,
     vignetteOpacity,
     filmNoiseOpacity,
-    tvNoiseOpacity,
   }
+}
+
+function AudioTrackPlayer({ tc }: { tc: TimelineClip }) {
+  const store = useProjectStore()
+  const audioRef = useRef<HTMLAudioElement>(null)
+  const sourceClip = useMemo(() => store.clips.find(c => c.id === tc.sourceClipId), [tc.sourceClipId, store.clips])
+  const [src, setSrc] = useState('')
+
+  useEffect(() => {
+    if (sourceClip?.filePath) {
+      setSrc(toFileUrl(sourceClip.filePath))
+    }
+  }, [sourceClip])
+
+  useEffect(() => {
+    const audio = audioRef.current
+    if (!audio || !src) return
+
+    audio.playbackRate = tc.playbackRate || 1
+    audio.volume = Math.min(1, tc.volume)
+    audio.muted = tc.muted || store.globalMute
+
+    const localTime = (store.currentTime - tc.startTime) * tc.playbackRate + tc.trimStart
+    if (Math.abs(audio.currentTime - localTime) > 0.25) {
+      audio.currentTime = Math.max(0, localTime)
+    }
+
+    if (store.isPlaying && !store.isBuffering && audio.paused) {
+      audio.play().catch(() => {})
+    } else if ((!store.isPlaying || store.isBuffering) && !audio.paused) {
+      audio.pause()
+    }
+  }, [store.currentTime, store.isPlaying, store.isBuffering, src, tc, store.globalMute])
+
+  return <audio ref={audioRef} src={src} style={{ display: 'none' }} />
 }
 
 export default function PreviewPlayer() {
@@ -112,6 +146,13 @@ export default function PreviewPlayer() {
       tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
     )
   }, [store.currentTime, store.timeline.text])
+
+  // Find active audio clips
+  const activeAudioClips = useMemo(() => {
+    return store.timeline.audio.filter(
+      tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
+    )
+  }, [store.currentTime, store.timeline.audio])
 
   const activeSource = useMemo(() => {
     return activeClip ? store.clips.find(c => c.id === activeClip.sourceClipId) ?? null : null
@@ -201,10 +242,34 @@ export default function PreviewPlayer() {
         tc => state.currentTime >= tc.startTime && state.currentTime < tc.startTime + tc.duration
       )
 
-      if (currentActiveClip && video && !video.paused && !video.seeking && !video.ended) {
-        newGlobalTime = currentActiveClip.startTime + ((video.currentTime - currentActiveClip.trimStart) / currentActiveClip.playbackRate)
+      if (currentActiveClip && video) {
+        // If video is loaded enough to play
+        if (video.readyState >= 3) {
+          if (state.isBuffering) state.setIsBuffering(false)
+          const expectedLocalTime = (newGlobalTime - currentActiveClip.startTime) * currentActiveClip.playbackRate + currentActiveClip.trimStart
+          
+          // Force sync if drifted too much
+          if (Math.abs(video.currentTime - expectedLocalTime) > 0.25) {
+            video.currentTime = Math.max(0, expectedLocalTime)
+          }
+
+          if (video.paused && store.isPlaying) {
+            video.play().catch(() => {})
+          }
+          
+          newGlobalTime += dt
+        } else {
+          // Video is buffering or loading a new clip. 
+          // We do NOT advance newGlobalTime, so the playhead pauses and waits for the video.
+          if (!state.isBuffering) state.setIsBuffering(true)
+        }
       } else {
+        // Empty space on timeline (no video clip)
+        if (state.isBuffering) state.setIsBuffering(false)
         newGlobalTime += dt
+        if (video && !video.paused) {
+          video.pause()
+        }
       }
 
       if (newGlobalTime >= state.duration) {
@@ -221,13 +286,11 @@ export default function PreviewPlayer() {
     return () => cancelAnimationFrame(reqId)
   }, [store.isPlaying])
 
-  // Play / pause
+  // Play / pause is now handled by the loop and the state
   useEffect(() => {
     const video = videoRef.current
     if (!video || !activeSource) return
-    if (store.isPlaying) {
-      video.play().catch(() => {})
-    } else {
+    if (!store.isPlaying && !video.paused) {
       video.pause()
     }
   }, [store.isPlaying, activeSource])
@@ -394,6 +457,11 @@ export default function PreviewPlayer() {
                 }}
               />
             )}
+            
+            {/* Audio Timeline Tracks */}
+            {activeAudioClips.map(tc => (
+              <AudioTrackPlayer key={tc.id} tc={tc} />
+            ))}
             
             {/* Text Overlays */}
             {activeTextClips.map(tc => (

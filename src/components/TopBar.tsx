@@ -34,6 +34,7 @@ export default function TopBar({ onExport }: TopBarProps) {
       duration: state.duration,
       exportSettings: state.exportSettings,
       timelineZoom: state.timelineZoom,
+      aspectRatio: state.aspectRatio,
     }
     await window.electronAPI.saveProject(JSON.stringify(stateToSave))
   }
@@ -44,19 +45,24 @@ export default function TopBar({ onExport }: TopBarProps) {
     if (data) {
       try {
         const parsed = JSON.parse(data)
+        const loadedTimeline = parsed.timeline || { video: [], audio: [], text: [] }
+        if (!loadedTimeline.text) loadedTimeline.text = [] // Backwards compatibility
+        
         useProjectStore.setState({
           name: parsed.name || 'Proyecto',
           clips: parsed.clips || [],
-          timeline: parsed.timeline || { video: [], audio: [] },
+          timeline: loadedTimeline,
           duration: parsed.duration || 0,
           exportSettings: parsed.exportSettings || store.exportSettings,
           timelineZoom: parsed.timelineZoom || 1,
+          aspectRatio: parsed.aspectRatio || 'original',
           currentTime: 0,
           selectedClipIds: [],
           isPlaying: false,
+          isBuffering: false,
           history: [{
             clips: parsed.clips || [],
-            timeline: parsed.timeline || { video: [], audio: [] },
+            timeline: loadedTimeline,
             description: 'Proyecto cargado'
           }],
           historyIndex: 0

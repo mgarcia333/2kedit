@@ -100,6 +100,7 @@ export interface ProjectState {
   duration: number
   selectedClipIds: string[]
   isPlaying: boolean
+  isBuffering: boolean
   exportSettings: ExportSettings
   aspectRatio: '16:9' | '9:16' | '1:1' | '4:3' | 'original'
   timelineZoom: number
@@ -161,6 +162,9 @@ export interface FFprobeStream {
   sample_rate?: string
   channels?: number
   bit_rate?: string
+  disposition?: {
+    attached_pic?: number
+  }
 }
 
 export interface FFprobeFormat {

@@ -10,7 +10,7 @@ export function useFFmpeg() {
     for (const filePath of filePaths) {
       try {
         const result: FFprobeResult = await window.electronAPI.probeFile(filePath)
-        const videoStream = result.streams.find(s => s.codec_type === 'video')
+        const videoStream = result.streams.find(s => s.codec_type === 'video' && s.disposition?.attached_pic !== 1)
         const audioStream = result.streams.find(s => s.codec_type === 'audio')
 
         const duration = parseFloat(result.format.duration) || 0
@@ -98,12 +98,14 @@ export function useFFmpeg() {
     const args: string[] = ['-y'] // Overwrite output
     const filterParts: string[] = []
     let inputIndex = 0
+    const clipInputIndex: Record<string, number> = {}
 
     // Add video clip inputs
     for (const tc of allTimelineClips) {
       const sourceClip = clips.find(c => c.id === tc.sourceClipId)
       if (!sourceClip) continue
       args.push('-i', sourceClip.filePath)
+      clipInputIndex[tc.id] = inputIndex
       inputIndex++
     }
 
@@ -112,6 +114,7 @@ export function useFFmpeg() {
       const sourceClip = clips.find(c => c.id === tc.sourceClipId)
       if (!sourceClip) continue
       args.push('-i', sourceClip.filePath)
+      clipInputIndex[tc.id] = inputIndex
       inputIndex++
     }
 
@@ -122,7 +125,8 @@ export function useFFmpeg() {
     for (let i = 0; i < allTimelineClips.length; i++) {
       const tc = allTimelineClips[i]
       const sourceClip = clips.find(c => c.id === tc.sourceClipId)
-      if (!sourceClip) continue
+      if (!sourceClip || clipInputIndex[tc.id] === undefined) continue
+      const streamIdx = clipInputIndex[tc.id]
 
       const clipEffects = buildClipFilters(tc)
       const sourceDuration = tc.duration * (tc.playbackRate || 1)
@@ -130,9 +134,9 @@ export function useFFmpeg() {
       const speedFilter = (tc.playbackRate && tc.playbackRate !== 1) ? `,setpts=${1 / tc.playbackRate}*PTS` : ''
 
       if (clipEffects.length > 0) {
-        filterParts.push(`[${i}:v]${trimFilter}${speedFilter},${clipEffects.join(',')}[v${i}]`)
+        filterParts.push(`[${streamIdx}:v]${trimFilter}${speedFilter},${clipEffects.join(',')}[v${i}]`)
       } else {
-        filterParts.push(`[${i}:v]${trimFilter}${speedFilter}[v${i}]`)
+        filterParts.push(`[${streamIdx}:v]${trimFilter}${speedFilter}[v${i}]`)
       }
       videoFilters.push(`[v${i}]`)
       vidIdx++
@@ -149,31 +153,37 @@ export function useFFmpeg() {
 
     // Handle audio
     let audioMixParts: string[] = []
-    const numVideoClips = allTimelineClips.length
 
     // Video clip audio tracks
     for (let i = 0; i < allTimelineClips.length; i++) {
       const tc = allTimelineClips[i]
       const sourceClip = clips.find(c => c.id === tc.sourceClipId)
-      if (!sourceClip || sourceClip.type !== 'video') continue
+      if (!sourceClip || sourceClip.type !== 'video' || clipInputIndex[tc.id] === undefined) continue
       if (tc.muted || !sourceClip.audioCodec) continue // Check if it actually has an audio track!
 
+      const streamIdx = clipInputIndex[tc.id]
       const sourceDuration = tc.duration * (tc.playbackRate || 1)
       const trimFilter = `atrim=${tc.trimStart}:${tc.trimStart + sourceDuration},asetpts=PTS-STARTPTS`
       const speedFilter = (tc.playbackRate && tc.playbackRate !== 1) ? `,atempo=${tc.playbackRate}` : ''
       const volFilter = `volume=${tc.volume}`
       const delayFilter = tc.startTime > 0 ? `,adelay=${Math.round(tc.startTime * 1000)}|${Math.round(tc.startTime * 1000)}` : ''
-      filterParts.push(`[${i}:a]${trimFilter}${speedFilter},${volFilter}${delayFilter}[va${i}]`)
+      filterParts.push(`[${streamIdx}:a]${trimFilter}${speedFilter},${volFilter}${delayFilter}[va${i}]`)
       audioMixParts.push(`[va${i}]`)
     }
 
     // External audio tracks
     for (let i = 0; i < audioTimelineClips.length; i++) {
       const tc = audioTimelineClips[i]
-      const globalIdx = numVideoClips + i
+      const sourceClip = clips.find(c => c.id === tc.sourceClipId)
+      if (!sourceClip || clipInputIndex[tc.id] === undefined) continue
+
+      const streamIdx = clipInputIndex[tc.id]
+      const sourceDuration = tc.duration * (tc.playbackRate || 1)
+      const trimFilter = `atrim=${tc.trimStart}:${tc.trimStart + sourceDuration},asetpts=PTS-STARTPTS`
+      const speedFilter = (tc.playbackRate && tc.playbackRate !== 1) ? `,atempo=${tc.playbackRate}` : ''
       const volFilter = `volume=${tc.volume}`
       const delayFilter = tc.startTime > 0 ? `,adelay=${Math.round(tc.startTime * 1000)}|${Math.round(tc.startTime * 1000)}` : ''
-      filterParts.push(`[${globalIdx}:a]${volFilter}${delayFilter}[aa${i}]`)
+      filterParts.push(`[${streamIdx}:a]${trimFilter}${speedFilter},${volFilter}${delayFilter}[aa${i}]`)
       audioMixParts.push(`[aa${i}]`)
     }
 
@@ -186,13 +196,34 @@ export function useFFmpeg() {
     }
 
     // Resolution inside filter complex to avoid -vf conflict
-    if (exportSettings.resolution !== 'original' && finalVideoMap) {
-      const resMap: Record<string, string> = { '1080p': '1920:1080', '720p': '1280:720', '480p': '854:480' }
-      const res = resMap[exportSettings.resolution]
-      if (res) {
-        filterParts.push(`${finalVideoMap}scale=${res}:force_original_aspect_ratio=decrease,pad=${res}:(ow-iw)/2:(oh-ih)/2:black[vout_scaled]`)
-        finalVideoMap = '[vout_scaled]'
+    if ((exportSettings.resolution !== 'original' || store.aspectRatio !== 'original') && finalVideoMap) {
+      let targetH = 1080
+      let targetW = 1920
+
+      if (exportSettings.resolution !== 'original') {
+        targetH = { '1080p': 1080, '720p': 720, '480p': 480 }[exportSettings.resolution] || 1080
+      } else {
+        const firstVid = clips.find(c => c.type === 'video' && c.height)
+        if (firstVid && firstVid.height) targetH = firstVid.height
       }
+
+      if (store.aspectRatio === '9:16') targetW = Math.round(targetH * 9 / 16)
+      else if (store.aspectRatio === '4:3') targetW = Math.round(targetH * 4 / 3)
+      else if (store.aspectRatio === '1:1') targetW = targetH
+      else if (store.aspectRatio === '16:9') targetW = Math.round(targetH * 16 / 9)
+      else {
+        // original aspect ratio, original resolution
+        const firstVid = clips.find(c => c.type === 'video' && c.width)
+        if (firstVid && firstVid.width) targetW = firstVid.width
+        else targetW = Math.round(targetH * 16 / 9) // Fallback
+      }
+
+      // Ensure even dimensions
+      if (targetW % 2 !== 0) targetW += 1
+      if (targetH % 2 !== 0) targetH += 1
+
+      filterParts.push(`${finalVideoMap}scale=${targetW}:${targetH}:force_original_aspect_ratio=decrease,pad=${targetW}:${targetH}:(ow-iw)/2:(oh-ih)/2:black[vout_scaled]`)
+      finalVideoMap = '[vout_scaled]'
     }
 
     // Add drawtext filters for text overlays
