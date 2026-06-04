@@ -228,8 +228,11 @@
 }
 .timeline-track:last-child { border-bottom: none; }
 .timeline-scrubber {
-  position: absolute; top: 0; bottom: 0; width: 1px;
-  background: var(--accent); z-index: 20; pointer-events: none;
+  position: absolute; top: 0; bottom: 0; width: 11px;
+  margin-left: -5px; z-index: 20; cursor: ew-resize;
+  border-left: 5px solid transparent; border-right: 5px solid transparent;
+  background: var(--accent);
+  background-clip: padding-box;
 }
 .timeline-scrubber::before {
   content: ''; position: absolute; top: -4px; left: -4px;

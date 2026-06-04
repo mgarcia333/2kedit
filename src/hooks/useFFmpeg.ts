@@ -80,6 +80,7 @@ export function useFFmpeg() {
       muted: false,
       fadeIn: 0,
       fadeOut: 0,
+      playbackRate: 1,
       track,
     }
 
@@ -124,22 +125,26 @@ export function useFFmpeg() {
       if (!sourceClip) continue
 
       const clipEffects = buildClipFilters(tc)
-      const trimFilter = `trim=${tc.trimStart}:${tc.trimStart + tc.duration},setpts=PTS-STARTPTS`
+      const sourceDuration = tc.duration * (tc.playbackRate || 1)
+      const trimFilter = `trim=${tc.trimStart}:${tc.trimStart + sourceDuration},setpts=PTS-STARTPTS`
+      const speedFilter = (tc.playbackRate && tc.playbackRate !== 1) ? `,setpts=${1 / tc.playbackRate}*PTS` : ''
 
       if (clipEffects.length > 0) {
-        filterParts.push(`[${i}:v]${trimFilter},${clipEffects.join(',')}[v${i}]`)
+        filterParts.push(`[${i}:v]${trimFilter}${speedFilter},${clipEffects.join(',')}[v${i}]`)
       } else {
-        filterParts.push(`[${i}:v]${trimFilter}[v${i}]`)
+        filterParts.push(`[${i}:v]${trimFilter}${speedFilter}[v${i}]`)
       }
       videoFilters.push(`[v${i}]`)
       vidIdx++
     }
 
     // Concatenate video clips
+    let finalVideoMap = ''
     if (videoFilters.length > 1) {
       filterParts.push(`${videoFilters.join('')}concat=n=${videoFilters.length}:v=1:a=0[vout]`)
+      finalVideoMap = '[vout]'
     } else if (videoFilters.length === 1) {
-      filterParts.push(`${videoFilters[0]}copy[vout]`)
+      finalVideoMap = videoFilters[0]
     }
 
     // Handle audio
@@ -151,11 +156,14 @@ export function useFFmpeg() {
       const tc = allTimelineClips[i]
       const sourceClip = clips.find(c => c.id === tc.sourceClipId)
       if (!sourceClip || sourceClip.type !== 'video') continue
-      if (tc.muted) continue
+      if (tc.muted || !sourceClip.audioCodec) continue // Check if it actually has an audio track!
 
-      const trimFilter = `atrim=${tc.trimStart}:${tc.trimStart + tc.duration},asetpts=PTS-STARTPTS`
+      const sourceDuration = tc.duration * (tc.playbackRate || 1)
+      const trimFilter = `atrim=${tc.trimStart}:${tc.trimStart + sourceDuration},asetpts=PTS-STARTPTS`
+      const speedFilter = (tc.playbackRate && tc.playbackRate !== 1) ? `,atempo=${tc.playbackRate}` : ''
       const volFilter = `volume=${tc.volume}`
-      filterParts.push(`[${i}:a]${trimFilter},${volFilter}[va${i}]`)
+      const delayFilter = tc.startTime > 0 ? `,adelay=${Math.round(tc.startTime * 1000)}|${Math.round(tc.startTime * 1000)}` : ''
+      filterParts.push(`[${i}:a]${trimFilter}${speedFilter},${volFilter}${delayFilter}[va${i}]`)
       audioMixParts.push(`[va${i}]`)
     }
 
@@ -164,38 +172,44 @@ export function useFFmpeg() {
       const tc = audioTimelineClips[i]
       const globalIdx = numVideoClips + i
       const volFilter = `volume=${tc.volume}`
-      const delayFilter = `adelay=${Math.round(tc.startTime * 1000)}|${Math.round(tc.startTime * 1000)}`
-      filterParts.push(`[${globalIdx}:a]${volFilter},${delayFilter}[aa${i}]`)
+      const delayFilter = tc.startTime > 0 ? `,adelay=${Math.round(tc.startTime * 1000)}|${Math.round(tc.startTime * 1000)}` : ''
+      filterParts.push(`[${globalIdx}:a]${volFilter}${delayFilter}[aa${i}]`)
       audioMixParts.push(`[aa${i}]`)
     }
 
+    let finalAudioMap = ''
     if (audioMixParts.length > 1) {
       filterParts.push(`${audioMixParts.join('')}amix=inputs=${audioMixParts.length}:normalize=0[aout]`)
+      finalAudioMap = '[aout]'
     } else if (audioMixParts.length === 1) {
-      filterParts.push(`${audioMixParts[0]}acopy[aout]`)
+      finalAudioMap = audioMixParts[0]
+    }
+
+    // Resolution inside filter complex to avoid -vf conflict
+    if (exportSettings.resolution !== 'original' && finalVideoMap) {
+      const resMap: Record<string, string> = { '1080p': '1920:1080', '720p': '1280:720', '480p': '854:480' }
+      const res = resMap[exportSettings.resolution]
+      if (res) {
+        filterParts.push(`${finalVideoMap}scale=${res}:force_original_aspect_ratio=decrease[vout_scaled]`)
+        finalVideoMap = '[vout_scaled]'
+      }
     }
 
     if (filterParts.length > 0) {
       args.push('-filter_complex', filterParts.join(';'))
-      args.push('-map', '[vout]')
-      if (audioMixParts.length > 0) {
-        args.push('-map', '[aout]')
-      }
-    } else {
-      args.push('-map', '0:v', '-map', '0:a?')
+    }
+
+    if (finalVideoMap) {
+      args.push('-map', finalVideoMap)
+    }
+    if (finalAudioMap) {
+      args.push('-map', finalAudioMap)
     }
 
     // Video codec settings
     args.push('-c:v', 'libx264')
     args.push('-crf', String(exportSettings.quality))
     args.push('-preset', 'slow')
-
-    // Resolution
-    if (exportSettings.resolution !== 'original') {
-      const resMap = { '1080p': '1920:1080', '720p': '1280:720', '480p': '854:480' }
-      const res = resMap[exportSettings.resolution]
-      if (res) args.push('-vf', `scale=${res}:force_original_aspect_ratio=decrease`)
-    }
 
     // FPS
     if (exportSettings.fps !== 'original') {
@@ -239,16 +253,6 @@ function buildClipFilters(clip: TimelineClip): string[] {
       case 'filmNoise': {
         const intensity = (effect.params.intensity as number) || 20
         filters.push(`noise=alls=${intensity}:allf=t+u`)
-        break
-      }
-      case 'slowMotion': {
-        const speed = (effect.params.speed as number) || 0.5
-        filters.push(`setpts=${1 / speed}*PTS`)
-        break
-      }
-      case 'fastMotion': {
-        const speed = (effect.params.speed as number) || 2
-        filters.push(`setpts=${1 / speed}*PTS`)
         break
       }
       case 'vignette': {

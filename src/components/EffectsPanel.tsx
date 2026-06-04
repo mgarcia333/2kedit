@@ -9,8 +9,6 @@ const EFFECT_TYPES: { type: EffectType; label: string }[] = [
   { type: 'vignette',      label: 'Vineta' },
   { type: 'brightness',    label: 'Brillo / Contraste' },
   { type: 'saturation',    label: 'Saturacion' },
-  { type: 'slowMotion',    label: 'Camara Lenta' },
-  { type: 'fastMotion',    label: 'Camara Rapida' },
   { type: 'blur',          label: 'Desenfoque' },
   { type: 'flipHorizontal',label: 'Voltear Horizontal' },
 ]
@@ -38,7 +36,7 @@ function EffectItem({ clip, effect }: { clip: TimelineClip; effect: TimelineClip
   const store = useProjectStore()
   const [expanded, setExpanded] = useState(false)
   const p = effect.params
-  const hasControls = ['filmNoise','vignette','brightness','saturation','slowMotion','fastMotion','blur'].includes(effect.type)
+  const hasControls = ['filmNoise','vignette','brightness','saturation','blur'].includes(effect.type)
 
   const update = (params: Record<string, number | string | boolean>) =>
     store.updateEffect(clip.id, effect.id, { ...p, ...params })
@@ -89,24 +87,6 @@ function EffectItem({ clip, effect }: { clip: TimelineClip; effect: TimelineClip
             <SliderRow label="Saturacion" value={p.saturation as number ?? 1} min={0} max={3} step={0.05}
               onChange={v => update({ saturation: v })} />
           )}
-          {effect.type === 'slowMotion' && (
-            <div className="slider-row">
-              <span className="slider-label">Velocidad</span>
-              <select value={String(p.speed ?? 0.5)} onChange={e => update({ speed: parseFloat(e.target.value) })} style={{ flex: 1 }}>
-                <option value="0.25">0.25x</option>
-                <option value="0.5">0.5x</option>
-              </select>
-            </div>
-          )}
-          {effect.type === 'fastMotion' && (
-            <div className="slider-row">
-              <span className="slider-label">Velocidad</span>
-              <select value={String(p.speed ?? 2)} onChange={e => update({ speed: parseFloat(e.target.value) })} style={{ flex: 1 }}>
-                <option value="2">2x</option>
-                <option value="4">4x</option>
-              </select>
-            </div>
-          )}
           {effect.type === 'blur' && (
             <SliderRow label="Radio" value={p.radius as number ?? 2} min={0} max={20} step={1}
               onChange={v => update({ radius: v })} />
@@ -121,14 +101,10 @@ export default function EffectsPanel() {
   const store = useProjectStore()
   const [showPicker, setShowPicker] = useState(false)
 
-  const selectedClip = [...store.timeline.video, ...store.timeline.audio]
-    .find(c => c.id === store.selectedClipId) ?? null
+  const selectedClips = [...store.timeline.video, ...store.timeline.audio]
+    .filter(c => store.selectedClipIds.includes(c.id))
 
-  const sourceClip = selectedClip
-    ? store.clips.find(c => c.id === selectedClip.sourceClipId)
-    : null
-
-  if (!selectedClip) {
+  if (selectedClips.length === 0) {
     return (
       <div className="effects-panel">
         <div className="panel-header">Efectos</div>
@@ -138,6 +114,21 @@ export default function EffectsPanel() {
       </div>
     )
   }
+
+  if (selectedClips.length > 1) {
+    return (
+      <div className="effects-panel">
+        <div className="panel-header">Efectos</div>
+        <div className="no-clip-msg">
+          Múltiples clips seleccionados ({selectedClips.length}).<br/>
+          Edita de uno en uno para ver sus propiedades.
+        </div>
+      </div>
+    )
+  }
+
+  const selectedClip = selectedClips[0]
+  const sourceClip = store.clips.find(c => c.id === selectedClip.sourceClipId)
 
   return (
     <div className="effects-panel">
@@ -149,9 +140,25 @@ export default function EffectsPanel() {
         <div style={{ fontSize: 11, fontWeight: 500, marginBottom: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
           {sourceClip?.fileName ?? 'Clip'}
         </div>
-        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'JetBrains Mono', monospace: '' }}>
+        <div style={{ fontSize: 10, color: 'var(--text-dim)', fontFamily: 'JetBrains Mono', marginBottom: 10 }}>
           {sourceClip?.width ? `${sourceClip.width}x${sourceClip.height}` : ''}
           {sourceClip?.fps ? ` ${sourceClip.fps}fps` : ''}
+        </div>
+        
+        <div className="slider-row">
+          <span className="slider-label">Velocidad</span>
+          <select 
+            value={String(selectedClip.playbackRate || 1)} 
+            onChange={e => store.updateTimelineClip(selectedClip.id, { playbackRate: parseFloat(e.target.value) })}
+            style={{ flex: 1, fontSize: 11, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 4px' }}
+          >
+            <option value="0.25">0.25x</option>
+            <option value="0.5">0.5x</option>
+            <option value="1">1.0x (Normal)</option>
+            <option value="1.5">1.5x</option>
+            <option value="2">2.0x</option>
+            <option value="4">4.0x</option>
+          </select>
         </div>
       </div>
 

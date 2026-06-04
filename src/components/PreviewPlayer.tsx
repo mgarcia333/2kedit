@@ -11,11 +11,9 @@ function formatTimecode(seconds: number): string {
   return `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}:${f.toString().padStart(2,'0')}`
 }
 
-/** Convert a Windows/Unix absolute path to a valid file:/// URL */
 function toFileUrl(filePath: string): string {
-  // Normalize backslashes → forward slashes
+  if (filePath.startsWith('file://')) return filePath
   const normalized = filePath.replace(/\\/g, '/')
-  // If it doesn't start with /, prepend one (Windows drive letter C:/...)
   return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
 }
 
@@ -69,12 +67,6 @@ function buildCSSStyle(effects: Effect[]): {
         vignetteOpacity = (effect.params.intensity as number) ?? 0.5
         break
       }
-      case 'slowMotion':
-        playbackRate = (effect.params.speed as number) ?? 0.5
-        break
-      case 'fastMotion':
-        playbackRate = (effect.params.speed as number) ?? 2
-        break
     }
   }
 
@@ -117,8 +109,8 @@ export default function PreviewPlayer() {
     if (!video) return
     video.style.filter = cssStyle.filter
     video.style.transform = cssStyle.transform || ''
-    video.playbackRate = cssStyle.playbackRate
-  }, [cssStyle])
+    video.playbackRate = activeClip?.playbackRate || 1
+  }, [cssStyle, activeClip?.playbackRate])
 
   // Load video src when active source changes
   useEffect(() => {
@@ -133,16 +125,16 @@ export default function PreviewPlayer() {
 
     const fileUrl = toFileUrl(activeSource.filePath)
 
-    if (fileUrl !== lastSrcRef.current) {
+    if (fileUrl !== lastSrcRef.current || video.src !== fileUrl) {
       lastSrcRef.current = fileUrl
       // Calculate where to seek after load
-      const localTime = activeClip ? (store.currentTime - activeClip.startTime) + activeClip.trimStart : 0
+      const localTime = activeClip ? (store.currentTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart : 0
       seekAfterLoadRef.current = localTime
 
       video.src = fileUrl
       video.load()
     }
-  }, [activeSource?.filePath])
+  }, [activeSource?.filePath, store.historyIndex]) // Added historyIndex so it reloads src if history changes or load happens
 
   // Seek after metadata loaded
   useEffect(() => {
@@ -159,11 +151,11 @@ export default function PreviewPlayer() {
     return () => video.removeEventListener('loadedmetadata', onLoaded)
   }, [])
 
-  // Sync scrubber position → video time (when not playing)
+  // Sync scrubber position -> video time (when not playing)
   useEffect(() => {
     const video = videoRef.current
     if (!video || store.isPlaying || !activeClip) return
-    const localTime = (store.currentTime - activeClip.startTime) + activeClip.trimStart
+    const localTime = (store.currentTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
     if (Math.abs(video.currentTime - localTime) > 0.08) {
       video.currentTime = Math.max(0, localTime)
     }
@@ -171,24 +163,44 @@ export default function PreviewPlayer() {
 
   // Update store time while video plays
   useEffect(() => {
-    const video = videoRef.current
-    if (!video || !activeClip) return
+    if (!store.isPlaying) return
 
-    const onTimeUpdate = () => {
-      if (!store.isPlaying) return
-      const globalTime = activeClip.startTime + (video.currentTime - activeClip.trimStart)
-      // Clamp to clip boundaries
-      if (globalTime >= activeClip.startTime + activeClip.duration) {
-        store.setPlaying(false)
-        store.setCurrentTime(activeClip.startTime + activeClip.duration)
+    let lastTime = performance.now()
+    let reqId: number
+
+    const loop = (now: number) => {
+      const dt = (now - lastTime) / 1000
+      lastTime = now
+
+      const state = useProjectStore.getState()
+      const video = videoRef.current
+      
+      let newGlobalTime = state.currentTime
+      
+      // Determine active clip dynamically to avoid stale closures
+      const currentActiveClip = state.timeline.video.find(
+        tc => state.currentTime >= tc.startTime && state.currentTime < tc.startTime + tc.duration
+      )
+
+      if (currentActiveClip && video && !video.paused && !video.seeking && !video.ended) {
+        newGlobalTime = currentActiveClip.startTime + ((video.currentTime - currentActiveClip.trimStart) / currentActiveClip.playbackRate)
+      } else {
+        newGlobalTime += dt
+      }
+
+      if (newGlobalTime >= state.duration) {
+        state.setCurrentTime(state.duration)
+        state.setPlaying(false)
         return
       }
-      store.setCurrentTime(globalTime)
+
+      state.setCurrentTime(newGlobalTime)
+      reqId = requestAnimationFrame(loop)
     }
 
-    video.addEventListener('timeupdate', onTimeUpdate)
-    return () => video.removeEventListener('timeupdate', onTimeUpdate)
-  }, [activeClip, store.isPlaying])
+    reqId = requestAnimationFrame(loop)
+    return () => cancelAnimationFrame(reqId)
+  }, [store.isPlaying])
 
   // Play / pause
   useEffect(() => {
@@ -205,15 +217,29 @@ export default function PreviewPlayer() {
   useEffect(() => {
     const video = videoRef.current
     if (!video || !activeClip) return
-    video.muted = activeClip.muted
+    video.muted = activeClip.muted || store.globalMute
     video.volume = Math.min(1, activeClip.volume)
-  }, [activeClip?.muted, activeClip?.volume])
+  }, [activeClip?.muted, activeClip?.volume, store.globalMute])
 
-  const handleProgressClick = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
+  const handleProgressMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (store.duration <= 0) return
     const rect = e.currentTarget.getBoundingClientRect()
-    const ratio = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width))
-    store.setCurrentTime(ratio * store.duration)
+    
+    const updateTime = (clientX: number) => {
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      store.setCurrentTime(ratio * store.duration)
+    }
+    
+    updateTime(e.clientX)
+    
+    const onMove = (ev: MouseEvent) => updateTime(ev.clientX)
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
   }, [store])
 
   const togglePlay = () => store.setPlaying(!store.isPlaying)
@@ -270,7 +296,7 @@ export default function PreviewPlayer() {
         <button className="btn-icon" onClick={frameNext} title="Frame siguiente (→)">&gt;</button>
         <button className="btn-icon" onClick={goToEnd} title="Final">&gt;|</button>
 
-        <div className="preview-progress" onClick={handleProgressClick} title="Clic para saltar">
+        <div className="preview-progress" onMouseDown={handleProgressMouseDown} title="Arrastra para saltar">
           <div className="preview-progress-fill" style={{ width: `${progress}%` }} />
         </div>
 

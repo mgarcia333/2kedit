@@ -18,6 +18,55 @@ export default function TopBar({ onExport }: TopBarProps) {
     if (paths.length) probeAndImport(paths)
   }
 
+  const handleImportFolder = async () => {
+    if (!isElectron()) return
+    const paths = await window.electronAPI.openMediaFolderDialog()
+    if (paths.length) probeAndImport(paths)
+  }
+
+  const handleSave = async () => {
+    if (!isElectron()) return
+    const state = useProjectStore.getState()
+    const stateToSave = {
+      name: state.name,
+      clips: state.clips,
+      timeline: state.timeline,
+      duration: state.duration,
+      exportSettings: state.exportSettings,
+      timelineZoom: state.timelineZoom,
+    }
+    await window.electronAPI.saveProject(JSON.stringify(stateToSave))
+  }
+
+  const handleLoad = async () => {
+    if (!isElectron()) return
+    const data = await window.electronAPI.loadProject()
+    if (data) {
+      try {
+        const parsed = JSON.parse(data)
+        useProjectStore.setState({
+          name: parsed.name || 'Proyecto',
+          clips: parsed.clips || [],
+          timeline: parsed.timeline || { video: [], audio: [] },
+          duration: parsed.duration || 0,
+          exportSettings: parsed.exportSettings || store.exportSettings,
+          timelineZoom: parsed.timelineZoom || 1,
+          currentTime: 0,
+          selectedClipIds: [],
+          isPlaying: false,
+          history: [{
+            clips: parsed.clips || [],
+            timeline: parsed.timeline || { video: [], audio: [] },
+            description: 'Proyecto cargado'
+          }],
+          historyIndex: 0
+        })
+      } catch (e) {
+        console.error('Invalid project file', e)
+      }
+    }
+  }
+
   return (
     <div className="topbar">
       <div className="topbar-logo">
@@ -53,8 +102,31 @@ export default function TopBar({ onExport }: TopBarProps) {
 
         <div className="topbar-divider" />
 
-        <button className="btn btn-ghost" onClick={handleImport} title="Importar (Ctrl+I)">
-          + Importar
+        <button className="btn btn-ghost" onClick={handleLoad} title="Cargar Proyecto">
+          Cargar
+        </button>
+        <button className="btn btn-ghost" onClick={handleSave} title="Guardar Proyecto" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
+          Guardar
+        </button>
+
+        <div className="topbar-divider" />
+
+        <button
+          className={`btn-icon ${store.globalMute ? 'active' : ''}`}
+          onClick={() => store.setGlobalMute(!store.globalMute)}
+          title="Silenciar Todo"
+          style={{ fontSize: 11, width: 'auto', padding: '0 8px', border: store.globalMute ? '1px solid var(--accent)' : '1px solid transparent', color: store.globalMute ? 'var(--accent)' : 'inherit' }}
+        >
+          {store.globalMute ? 'MUTED' : 'MUTE'}
+        </button>
+
+        <div className="topbar-divider" />
+
+        <button className="btn btn-ghost" onClick={handleImportFolder} title="Importar Carpeta entera">
+          + Carpeta
+        </button>
+        <button className="btn btn-ghost" onClick={handleImport} title="Importar Archivos (Ctrl+I)">
+          + Archivos
         </button>
 
         <button

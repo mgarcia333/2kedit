@@ -121,6 +121,37 @@ ipcMain.handle('dialog:openFolder', async () => {
   return result.canceled ? null : result.filePaths[0]
 })
 
+function findMediaFiles(dir: string, fileList: string[] = []) {
+  const exts = new Set(['.mp4', '.mov', '.avi', '.mkv', '.webm', '.mp3', '.wav', '.aac', '.flac', '.m4a'])
+  try {
+    const files = fs.readdirSync(dir, { withFileTypes: true })
+    for (const file of files) {
+      if (file.isDirectory()) {
+        findMediaFiles(path.join(dir, file.name), fileList)
+      } else {
+        if (exts.has(path.extname(file.name).toLowerCase())) {
+          fileList.push(path.join(dir, file.name))
+        }
+      }
+    }
+  } catch (e) {
+    console.error('Error reading directory:', e)
+  }
+  return fileList
+}
+
+ipcMain.handle('dialog:openMediaFolder', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openDirectory', 'multiSelections'],
+  })
+  if (result.canceled) return []
+  const allFiles: string[] = []
+  for (const folder of result.filePaths) {
+    findMediaFiles(folder, allFiles)
+  }
+  return allFiles
+})
+
 // Shell operations
 ipcMain.handle('shell:openFolder', async (_, folderPath: string) => {
   await shell.openPath(folderPath)
@@ -128,6 +159,38 @@ ipcMain.handle('shell:openFolder', async (_, folderPath: string) => {
 
 ipcMain.handle('shell:openFile', async (_, filePath: string) => {
   await shell.openPath(filePath)
+})
+
+// Project Save/Load
+ipcMain.handle('dialog:saveProject', async (_, data: string) => {
+  const result = await dialog.showSaveDialog(mainWindow!, {
+    title: 'Guardar Proyecto',
+    defaultPath: 'proyecto.2kedit',
+    filters: [{ name: '2kedit Project', extensions: ['2kedit'] }],
+  })
+  if (!result.canceled && result.filePath) {
+    fs.writeFileSync(result.filePath, data, 'utf-8')
+    return true
+  }
+  return false
+})
+
+ipcMain.handle('dialog:loadProject', async () => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    title: 'Cargar Proyecto',
+    properties: ['openFile'],
+    filters: [{ name: '2kedit Project', extensions: ['2kedit'] }],
+  })
+  if (!result.canceled && result.filePaths.length > 0) {
+    try {
+      const content = fs.readFileSync(result.filePaths[0], 'utf-8')
+      return content
+    } catch (e) {
+      console.error('Error reading project file:', e)
+      return null
+    }
+  }
+  return null
 })
 
 // FFprobe IPC

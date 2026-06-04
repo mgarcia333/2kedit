@@ -48,8 +48,12 @@ function TimelineRuler({ pixelsPerSecond, duration, width }: {
 function TimelineClipEl({ clip, pixelsPerSecond }: { clip: TimelineClip; pixelsPerSecond: number }) {
   const store = useProjectStore()
   const sourceClip = store.clips.find(c => c.id === clip.sourceClipId)
-  const isSelected = store.selectedClipId === clip.id
-  const dragRef = useRef({ active: false, startX: 0, startTime: 0 })
+  const isSelected = store.selectedClipIds.includes(clip.id)
+  const dragRef = useRef<{
+    active: boolean;
+    startX: number;
+    startTimes: Record<string, number>
+  }>({ active: false, startX: 0, startTimes: {} })
 
   const x = clip.startTime * pixelsPerSecond
   const w = Math.max(4, clip.duration * pixelsPerSecond)
@@ -57,15 +61,38 @@ function TimelineClipEl({ clip, pixelsPerSecond }: { clip: TimelineClip; pixelsP
   const handleMouseDown = (e: React.MouseEvent) => {
     if ((e.target as HTMLElement).classList.contains('clip-trim-handle')) return
     e.stopPropagation()
-    store.setSelectedClipId(clip.id)
-    dragRef.current = { active: true, startX: e.clientX, startTime: clip.startTime }
+    
+    if (e.ctrlKey) {
+      store.toggleSelectedClipId(clip.id, true)
+    } else {
+      if (!isSelected) {
+        store.toggleSelectedClipId(clip.id, false)
+      }
+    }
+
+    const state = useProjectStore.getState()
+    const idsToMove = state.selectedClipIds.includes(clip.id) ? state.selectedClipIds : [clip.id]
+    const allClips = [...state.timeline.video, ...state.timeline.audio]
+    
+    const startTimes: Record<string, number> = {}
+    for (const c of allClips) {
+      if (idsToMove.includes(c.id)) startTimes[c.id] = c.startTime
+    }
+
+    dragRef.current = { active: true, startX: e.clientX, startTimes }
 
     const onMove = (ev: MouseEvent) => {
       if (!dragRef.current.active) return
       const dt = (ev.clientX - dragRef.current.startX) / pixelsPerSecond
-      store.moveTimelineClip(clip.id, Math.max(0, dragRef.current.startTime + dt))
+      
+      const updates = idsToMove.map(id => ({
+        id,
+        newStartTime: (dragRef.current.startTimes[id] || 0) + dt
+      }))
+      store.moveTimelineClips(updates)
     }
     const onUp = () => {
+      if (dragRef.current.active) store.saveHistory('Mover clip(s)')
       dragRef.current.active = false
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
@@ -82,20 +109,24 @@ function TimelineClipEl({ clip, pixelsPerSecond }: { clip: TimelineClip; pixelsP
     const origTrimStart = clip.trimStart
 
     const onMove = (ev: MouseEvent) => {
-      const dt = (ev.clientX - startX) / pixelsPerSecond
+      let dt = (ev.clientX - startX) / pixelsPerSecond
+      
       if (side === 'left') {
-        const newDuration = Math.max(0.1, origDuration - dt)
-        const diff = origDuration - newDuration
+        // Enforce trimStart >= 0 and duration >= 0.1
+        dt = Math.max(-origTrimStart, Math.min(origDuration - 0.1, dt))
         store.updateTimelineClip(clip.id, {
-          startTime: Math.max(0, origStart + diff),
-          duration: newDuration,
-          trimStart: Math.max(0, origTrimStart + diff),
+          startTime: origStart + dt,
+          duration: origDuration - dt,
+          trimStart: origTrimStart + dt,
         })
       } else {
-        store.updateTimelineClip(clip.id, { duration: Math.max(0.1, origDuration + dt) })
+        const maxDuration = (sourceClip?.duration || origDuration) - origTrimStart
+        const newDuration = Math.max(0.1, Math.min(maxDuration, origDuration + dt))
+        store.updateTimelineClip(clip.id, { duration: newDuration })
       }
     }
     const onUp = () => {
+      store.saveHistory('Recortar clip')
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
     }
@@ -136,12 +167,38 @@ export default function Timeline() {
     return () => obs.disconnect()
   }, [])
 
-  const handleWheel = (e: React.WheelEvent) => {
-    if (e.ctrlKey || e.metaKey) {
-      e.preventDefault()
-      store.setTimelineZoom(store.timelineZoom * (e.deltaY < 0 ? 1.15 : 0.87))
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (document.activeElement?.tagName === 'INPUT') return
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        const state = useProjectStore.getState()
+        if (state.selectedClipIds.length > 0) {
+          state.removeTimelineClips(state.selectedClipIds)
+        }
+      }
     }
-  }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [])
+
+  // Ref for native wheel to allow preventDefault
+  const timelineRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    const el = timelineRef.current
+    if (!el) return
+
+    const handleWheelNative = (e: WheelEvent) => {
+      if (e.ctrlKey || e.metaKey) {
+        e.preventDefault()
+        const state = useProjectStore.getState()
+        state.setTimelineZoom(state.timelineZoom * (e.deltaY < 0 ? 1.15 : 0.87))
+      }
+    }
+
+    el.addEventListener('wheel', handleWheelNative, { passive: false })
+    return () => el.removeEventListener('wheel', handleWheelNative)
+  }, [])
 
   const handleTrackClick = useCallback((e: React.MouseEvent) => {
     if ((e.target as HTMLElement).closest('.timeline-clip')) return
@@ -160,8 +217,25 @@ export default function Timeline() {
 
   const scrubberX = store.currentTime * pps
 
+  const handleScrubberMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    const startX = e.clientX
+    const startT = store.currentTime
+
+    const onMove = (ev: MouseEvent) => {
+      const dt = (ev.clientX - startX) / pps
+      store.setCurrentTime(Math.max(0, Math.min(store.duration, startT + dt)))
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   return (
-    <div className="timeline" onWheel={handleWheel}>
+    <div className="timeline" ref={timelineRef}>
       <div className="timeline-header">
         <span style={{ fontSize: 10, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'var(--text-muted)' }}>
           Timeline
@@ -172,14 +246,15 @@ export default function Timeline() {
           <button className="btn-icon" style={{ fontSize: 10 }} onClick={store.removeGaps} title="Eliminar huecos">[ ]</button>
         </div>
         <div style={{ flex: 1 }} />
-        {store.selectedClipId && (
+        {store.selectedClipIds.length > 0 && (
           <div style={{ display: 'flex', gap: 4 }}>
             <button
               className="btn btn-ghost"
               style={{ fontSize: 11, padding: '2px 9px' }}
               onClick={() => {
-                const clip = [...store.timeline.video, ...store.timeline.audio].find(c => c.id === store.selectedClipId)
-                if (clip) store.splitClip(clip.id, store.currentTime)
+                store.selectedClipIds.forEach(id => {
+                  store.splitClip(id, store.currentTime)
+                })
               }}
               title="Cortar en scrubber (S)"
             >
@@ -188,7 +263,11 @@ export default function Timeline() {
             <button
               className="btn btn-danger"
               style={{ fontSize: 11, padding: '2px 9px' }}
-              onClick={() => { if (store.selectedClipId) store.removeFromTimeline(store.selectedClipId) }}
+              onClick={() => {
+                if (store.selectedClipIds.length > 0) {
+                  store.removeTimelineClips(store.selectedClipIds)
+                }
+              }}
               title="Eliminar (Delete)"
             >
               Eliminar
@@ -237,7 +316,11 @@ export default function Timeline() {
             </div>
 
             {/* Scrubber */}
-            <div className="timeline-scrubber" style={{ left: scrubberX }} />
+            <div 
+              className="timeline-scrubber" 
+              style={{ left: scrubberX }} 
+              onMouseDown={handleScrubberMouseDown}
+            />
           </div>
         </div>
       </div>

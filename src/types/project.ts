@@ -1,8 +1,6 @@
 export type EffectType =
   | 'blackAndWhite'
   | 'filmNoise'
-  | 'slowMotion'
-  | 'fastMotion'
   | 'vignette'
   | 'brightness'
   | 'saturation'
@@ -51,6 +49,7 @@ export interface TimelineClip {
   muted: boolean
   fadeIn: number        // fade in duration in seconds
   fadeOut: number       // fade out duration in seconds
+  playbackRate: number  // playback speed (default 1)
   track: 'video' | 'audio'
 }
 
@@ -82,7 +81,7 @@ export interface ProjectState {
   }
   currentTime: number
   duration: number
-  selectedClipId: string | null
+  selectedClipIds: string[]
   isPlaying: boolean
   exportSettings: ExportSettings
   timelineZoom: number
@@ -90,6 +89,7 @@ export interface ProjectState {
   historyIndex: number
   ffmpegAvailable: boolean
   tempDir: string
+  globalMute: boolean
 }
 
 export type ProjectAction =
@@ -100,7 +100,7 @@ export type ProjectAction =
   | { type: 'UPDATE_TIMELINE_CLIP'; id: string; changes: Partial<TimelineClip> }
   | { type: 'SET_CURRENT_TIME'; time: number }
   | { type: 'SET_PLAYING'; playing: boolean }
-  | { type: 'SET_SELECTED_CLIP'; id: string | null }
+  | { type: 'SET_SELECTED_CLIPS'; ids: string[] }
   | { type: 'SET_TIMELINE_ZOOM'; zoom: number }
   | { type: 'SET_EXPORT_SETTINGS'; settings: Partial<ExportSettings> }
   | { type: 'UNDO' }
@@ -116,6 +116,9 @@ declare global {
       openFileDialog: () => Promise<string[]>
       saveFileDialog: (name: string) => Promise<string | null>
       openFolderDialog: () => Promise<string | null>
+      openMediaFolderDialog: () => Promise<string[]>
+      saveProject: (data: string) => Promise<boolean>
+      loadProject: () => Promise<string | null>
       openFolder: (folderPath: string) => Promise<void>
       openFile: (filePath: string) => Promise<void>
       probeFile: (filePath: string) => Promise<FFprobeResult>

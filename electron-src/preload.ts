@@ -10,6 +10,9 @@ contextBridge.exposeInMainWorld('electronAPI', {
   openFileDialog: () => ipcRenderer.invoke('dialog:openFile'),
   saveFileDialog: (name: string) => ipcRenderer.invoke('dialog:saveFile', name),
   openFolderDialog: () => ipcRenderer.invoke('dialog:openFolder'),
+  openMediaFolderDialog: () => ipcRenderer.invoke('dialog:openMediaFolder'),
+  saveProject: (data: string) => ipcRenderer.invoke('dialog:saveProject', data),
+  loadProject: () => ipcRenderer.invoke('dialog:loadProject'),
 
   // Shell
   openFolder: (folderPath: string) => ipcRenderer.invoke('shell:openFolder', folderPath),

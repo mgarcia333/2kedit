@@ -28,8 +28,10 @@ interface ProjectStore extends ProjectState {
   // Timeline management
   addToTimeline: (clip: TimelineClip) => void
   removeFromTimeline: (id: string) => void
+  removeTimelineClips: (ids: string[]) => void
   updateTimelineClip: (id: string, changes: Partial<TimelineClip>) => void
   moveTimelineClip: (id: string, newStartTime: number) => void
+  moveTimelineClips: (updates: { id: string, newStartTime: number }[]) => void
   splitClip: (id: string, splitTime: number) => void
   removeGaps: () => void
 
@@ -45,7 +47,8 @@ interface ProjectStore extends ProjectState {
   setDuration: (duration: number) => void
 
   // Selection
-  setSelectedClipId: (id: string | null) => void
+  setSelectedClipIds: (ids: string[]) => void
+  toggleSelectedClipId: (id: string, multi: boolean) => void
 
   // Timeline settings
   setTimelineZoom: (zoom: number) => void
@@ -57,6 +60,7 @@ interface ProjectStore extends ProjectState {
   setFFmpegAvailable: (available: boolean) => void
   setTempDir: (dir: string) => void
   setProjectName: (name: string) => void
+  setGlobalMute: (mute: boolean) => void
 
   // History
   undo: () => void
@@ -68,8 +72,6 @@ function getEffectLabel(type: EffectType): string {
   const labels: Record<EffectType, string> = {
     blackAndWhite: 'Blanco y Negro',
     filmNoise: 'Ruido de Película',
-    slowMotion: 'Cámara Lenta',
-    fastMotion: 'Cámara Rápida',
     vignette: 'Viñeta',
     brightness: 'Brillo / Contraste',
     saturation: 'Saturación',
@@ -85,8 +87,6 @@ function getDefaultParams(type: EffectType): Record<string, number | string | bo
   const defaults: Record<EffectType, Record<string, number | string | boolean>> = {
     blackAndWhite: {},
     filmNoise: { intensity: 20 },
-    slowMotion: { speed: 0.5 },
-    fastMotion: { speed: 2 },
     vignette: { intensity: 0.5 },
     brightness: { brightness: 0, contrast: 1 },
     saturation: { saturation: 1 },
@@ -111,14 +111,19 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   timeline: { video: [], audio: [] },
   currentTime: 0,
   duration: 0,
-  selectedClipId: null,
+  selectedClipIds: [],
   isPlaying: false,
   exportSettings: DEFAULT_EXPORT_SETTINGS,
   timelineZoom: 1,
-  history: [],
-  historyIndex: -1,
+  history: [{
+    clips: [],
+    timeline: { video: [], audio: [] },
+    description: 'Estado Inicial',
+  }],
+  historyIndex: 0,
   ffmpegAvailable: false,
   tempDir: '',
+  globalMute: false,
 
   // Clip management
   addClip: (clip) => {
@@ -137,7 +142,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   // Timeline management
   addToTimeline: (clip) => {
-    get().saveHistory(`Añadir clip al timeline`)
     set(state => {
       const newTimeline = {
         ...state.timeline,
@@ -148,10 +152,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         duration: computeTimelineDuration(newTimeline),
       }
     })
+    get().saveHistory(`Añadir clip al timeline`)
   },
 
   removeFromTimeline: (id) => {
-    get().saveHistory('Eliminar clip del timeline')
     set(state => {
       const newTimeline = {
         video: state.timeline.video.filter(c => c.id !== id),
@@ -160,9 +164,26 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       return {
         timeline: newTimeline,
         duration: computeTimelineDuration(newTimeline),
-        selectedClipId: state.selectedClipId === id ? null : state.selectedClipId,
+        selectedClipIds: state.selectedClipIds.filter(cid => cid !== id),
       }
     })
+    get().saveHistory('Eliminar clip del timeline')
+  },
+
+  removeTimelineClips: (ids) => {
+    if (ids.length === 0) return
+    set(state => {
+      const newTimeline = {
+        video: state.timeline.video.filter(c => !ids.includes(c.id)),
+        audio: state.timeline.audio.filter(c => !ids.includes(c.id)),
+      }
+      return {
+        timeline: newTimeline,
+        duration: computeTimelineDuration(newTimeline),
+        selectedClipIds: state.selectedClipIds.filter(cid => !ids.includes(cid)),
+      }
+    })
+    get().saveHistory('Eliminar clips del timeline')
   },
 
   updateTimelineClip: (id, changes) => {
@@ -181,7 +202,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   moveTimelineClip: (id, newStartTime) => {
-    get().saveHistory('Mover clip')
     set(state => {
       const updateTrack = (track: TimelineClip[]) =>
         track.map(c => c.id === id ? { ...c, startTime: Math.max(0, newStartTime) } : c)
@@ -196,8 +216,24 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     })
   },
 
+  moveTimelineClips: (updates) => {
+    if (updates.length === 0) return
+    set(state => {
+      const updateMap = new Map(updates.map(u => [u.id, Math.max(0, u.newStartTime)]))
+      const updateTrack = (track: TimelineClip[]) =>
+        track.map(c => updateMap.has(c.id) ? { ...c, startTime: updateMap.get(c.id)! } : c)
+      const newTimeline = {
+        video: updateTrack(state.timeline.video),
+        audio: updateTrack(state.timeline.audio),
+      }
+      return {
+        timeline: newTimeline,
+        duration: computeTimelineDuration(newTimeline),
+      }
+    })
+  },
+
   splitClip: (id, splitTime) => {
-    get().saveHistory('Cortar clip')
     set(state => {
       const allClips = [...state.timeline.video, ...state.timeline.audio]
       const clip = allClips.find(c => c.id === id)
@@ -234,10 +270,10 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         duration: computeTimelineDuration(newTimeline),
       }
     })
+    get().saveHistory('Cortar clip')
   },
 
   removeGaps: () => {
-    get().saveHistory('Eliminar huecos')
     set(state => {
       const sortByStart = (clips: TimelineClip[]) =>
         [...clips].sort((a, b) => a.startTime - b.startTime)
@@ -262,6 +298,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         duration: computeTimelineDuration(newTimeline),
       }
     })
+    get().saveHistory('Eliminar huecos')
   },
 
   // Effects
@@ -273,7 +310,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       params: getDefaultParams(effectType),
       enabled: true,
     }
-    get().saveHistory(`Añadir efecto: ${effect.label}`)
     get().updateTimelineClip(clipId, {
       effects: [
         ...(get().timeline.video.find(c => c.id === clipId) ||
@@ -281,6 +317,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
         effect,
       ],
     })
+    get().saveHistory(`Añadir efecto: ${effect.label}`)
   },
 
   removeEffect: (clipId, effectId) => {
@@ -316,7 +353,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   setDuration: (duration) => set({ duration }),
 
   // Selection
-  setSelectedClipId: (id) => set({ selectedClipId: id }),
+  setSelectedClipIds: (ids) => set({ selectedClipIds: ids }),
+  toggleSelectedClipId: (id, multi) => set(state => {
+    if (!multi) return { selectedClipIds: [id] }
+    if (state.selectedClipIds.includes(id)) {
+      return { selectedClipIds: state.selectedClipIds.filter(cid => cid !== id) }
+    }
+    return { selectedClipIds: [...state.selectedClipIds, id] }
+  }),
 
   // Timeline settings
   setTimelineZoom: (zoom) => set({ timelineZoom: Math.max(0.1, Math.min(10, zoom)) }),
@@ -329,6 +373,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   setFFmpegAvailable: (available) => set({ ffmpegAvailable: available }),
   setTempDir: (dir) => set({ tempDir: dir }),
   setProjectName: (name) => set({ name }),
+  setGlobalMute: (mute) => set({ globalMute: mute }),
 
   // History (undo/redo)
   saveHistory: (description) => {
@@ -347,25 +392,29 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   undo: () => {
     const state = get()
-    if (state.historyIndex <= 0) return
-    const entry = state.history[state.historyIndex - 1]
+    if (state.historyIndex <= 0) return // Ya estamos en el estado más antiguo
+    const targetIndex = state.historyIndex - 1
+    const entry = state.history[targetIndex]
     set({
       clips: JSON.parse(JSON.stringify(entry.clips)),
       timeline: JSON.parse(JSON.stringify(entry.timeline)),
       duration: computeTimelineDuration(entry.timeline),
-      historyIndex: state.historyIndex - 1,
+      historyIndex: targetIndex,
+      selectedClipIds: [],
     })
   },
 
   redo: () => {
     const state = get()
     if (state.historyIndex >= state.history.length - 1) return
-    const entry = state.history[state.historyIndex + 1]
+    const targetIndex = state.historyIndex + 1
+    const entry = state.history[targetIndex]
     set({
       clips: JSON.parse(JSON.stringify(entry.clips)),
       timeline: JSON.parse(JSON.stringify(entry.timeline)),
       duration: computeTimelineDuration(entry.timeline),
-      historyIndex: state.historyIndex + 1,
+      historyIndex: targetIndex,
+      selectedClipIds: [],
     })
   },
 }))
