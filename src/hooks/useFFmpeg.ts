@@ -190,9 +190,30 @@ export function useFFmpeg() {
       const resMap: Record<string, string> = { '1080p': '1920:1080', '720p': '1280:720', '480p': '854:480' }
       const res = resMap[exportSettings.resolution]
       if (res) {
-        filterParts.push(`${finalVideoMap}scale=${res}:force_original_aspect_ratio=decrease[vout_scaled]`)
+        filterParts.push(`${finalVideoMap}scale=${res}:force_original_aspect_ratio=decrease,pad=${res}:(ow-iw)/2:(oh-ih)/2:black[vout_scaled]`)
         finalVideoMap = '[vout_scaled]'
       }
+    }
+
+    // Add drawtext filters for text overlays
+    if (store.timeline.text.length > 0 && finalVideoMap) {
+      const textFilters: string[] = []
+      let lastMap = finalVideoMap
+      for (let i = 0; i < store.timeline.text.length; i++) {
+        const tc = store.timeline.text[i]
+        // Escape text for drawtext filter
+        const escapedText = tc.text.replace(/\\/g, '\\\\').replace(/:/g, '\\:').replace(/'/g, "\\'")
+        const enableStr = `enable='between(t,${tc.startTime},${tc.startTime + tc.duration})'`
+        const xStr = `(w*${tc.x}/100)-(text_w/2)`
+        const yStr = `(h*${tc.y}/100)-(text_h/2)`
+        const fontStr = tc.fontFamily ? `:font='${tc.fontFamily}'` : ''
+        const drawtextStr = `drawtext=text='${escapedText}'${fontStr}:x=${xStr}:y=${yStr}:fontsize=${tc.fontSize}:fontcolor=${tc.color}:shadowcolor=black@0.8:shadowx=0:shadowy=2:${enableStr}`
+        
+        const nextMap = `[vout_text${i}]`
+        filterParts.push(`${lastMap}${drawtextStr}${nextMap}`)
+        lastMap = nextMap
+      }
+      finalVideoMap = lastMap
     }
 
     if (filterParts.length > 0) {
@@ -252,6 +273,12 @@ function buildClipFilters(clip: TimelineClip): string[] {
         break
       case 'filmNoise': {
         const intensity = (effect.params.intensity as number) || 20
+        filters.push(`noise=alls=${intensity}:allf=t+u`)
+        break
+      }
+      case 'noise': {
+        const intensity = (effect.params.intensity as number) || 50
+        // Use higher strength noise for digital static TV noise
         filters.push(`noise=alls=${intensity}:allf=t+u`)
         break
       }

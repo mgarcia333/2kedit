@@ -1,11 +1,12 @@
 import { useState, useRef } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
-import type { EffectType, TimelineClip } from '../types/project'
+import type { EffectType, TimelineClip, TextClip } from '../types/project'
 
 const EFFECT_TYPES: { type: EffectType; label: string }[] = [
   { type: 'blackAndWhite', label: 'Blanco y Negro' },
   { type: 'sepia',         label: 'Sepia' },
-  { type: 'filmNoise',     label: 'Ruido de Pelicula' },
+  { type: 'filmNoise',     label: 'Granulado de Pelicula' },
+  { type: 'noise',         label: 'Ruido Digital' },
   { type: 'vignette',      label: 'Vineta' },
   { type: 'brightness',    label: 'Brillo / Contraste' },
   { type: 'saturation',    label: 'Saturacion' },
@@ -73,6 +74,10 @@ function EffectItem({ clip, effect }: { clip: TimelineClip; effect: TimelineClip
             <SliderRow label="Intensidad" value={p.intensity as number ?? 20} min={0} max={100} step={1}
               onChange={v => update({ intensity: v })} />
           )}
+          {effect.type === 'noise' && (
+            <SliderRow label="Intensidad" value={p.intensity as number ?? 50} min={0} max={100} step={1}
+              onChange={v => update({ intensity: v })} />
+          )}
           {effect.type === 'vignette' && (
             <SliderRow label="Intensidad" value={p.intensity as number ?? 0.5} min={0.1} max={1} step={0.05}
               onChange={v => update({ intensity: v })} />
@@ -103,31 +108,102 @@ export default function EffectsPanel() {
 
   const selectedClips = [...store.timeline.video, ...store.timeline.audio]
     .filter(c => store.selectedClipIds.includes(c.id))
-
-  if (selectedClips.length === 0) {
+  if (store.selectedClipIds.length === 0) {
     return (
-      <div className="effects-panel">
-        <div className="panel-header">Efectos</div>
-        <div className="no-clip-msg">
-          Selecciona un clip en el timeline para ver sus ajustes y efectos
+      <div className="panel effects-panel">
+        <div className="panel-header">Propiedades</div>
+        <div style={{ padding: 16, color: 'var(--text-dim)', fontSize: 11, textAlign: 'center' }}>
+          Selecciona un clip para ver sus propiedades
         </div>
       </div>
     )
   }
 
-  if (selectedClips.length > 1) {
+  const selectedClipId = store.selectedClipIds[0]
+  const selectedTimelineClip = [...store.timeline.video, ...store.timeline.audio].find(c => c.id === selectedClipId)
+  const selectedTextClip = store.timeline.text.find(c => c.id === selectedClipId)
+
+  if (selectedTextClip) {
+    const update = (changes: Partial<TextClip>) => store.updateTimelineClip(selectedTextClip.id, changes as any)
     return (
-      <div className="effects-panel">
-        <div className="panel-header">Efectos</div>
-        <div className="no-clip-msg">
-          Múltiples clips seleccionados ({selectedClips.length}).<br/>
-          Edita de uno en uno para ver sus propiedades.
+      <div className="panel effects-panel">
+        <div className="panel-header">Propiedades de Texto</div>
+        <div className="effects-section">
+          <div style={{ marginBottom: 12 }}>
+            <span className="slider-label" style={{ display: 'block', marginBottom: 4 }}>Contenido</span>
+            <textarea
+              value={selectedTextClip.text}
+              onChange={e => update({ text: e.target.value })}
+              style={{ width: '100%', height: 60, fontSize: 12, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px 6px', resize: 'none' }}
+            />
+          </div>
+          
+          <div style={{ marginBottom: 12 }}>
+            <span className="slider-label" style={{ display: 'block', marginBottom: 4 }}>Fuente</span>
+            <select
+              value={selectedTextClip.fontFamily || 'Inter'}
+              onChange={e => update({ fontFamily: e.target.value })}
+              style={{ width: '100%', fontSize: 11, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px' }}
+            >
+              <option value="Inter">Inter (Por defecto)</option>
+              <option value="Arial">Arial</option>
+              <option value="Times New Roman">Times New Roman</option>
+              <option value="Courier New">Courier New</option>
+              <option value="Impact">Impact</option>
+              <option value="Georgia">Georgia</option>
+              <option value="Verdana">Verdana</option>
+              <option value="Trebuchet MS">Trebuchet MS</option>
+              <option value="Comic Sans MS">Comic Sans MS</option>
+            </select>
+          </div>
+          
+          <SliderRow label="Tamano" value={selectedTextClip.fontSize} min={10} max={200} step={1} onChange={v => update({ fontSize: v })} />
+          <SliderRow label="Posicion X (%)" value={selectedTextClip.x} min={0} max={100} step={1} onChange={v => update({ x: v })} />
+          <SliderRow label="Posicion Y (%)" value={selectedTextClip.y} min={0} max={100} step={1} onChange={v => update({ y: v })} />
+          
+          <div className="slider-row">
+            <span className="slider-label">Color</span>
+            <input 
+              type="color" 
+              value={selectedTextClip.color} 
+              onChange={e => update({ color: e.target.value })}
+              style={{ padding: 0, border: 'none', background: 'none', width: 24, height: 24, cursor: 'pointer' }}
+            />
+          </div>
         </div>
       </div>
     )
   }
 
-  const selectedClip = selectedClips[0]
+  const selectedClip = selectedTimelineClip
+  if (!selectedClip) {
+    return (
+      <div className="effects-panel">
+        <div className="panel-header">Ajustes del Proyecto</div>
+        <div className="effects-section">
+          <div className="effects-section-title">Resolución y Bordes</div>
+          <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
+            Configura el formato del lienzo (aspect ratio). Añadirá bordes negros al exportar si es necesario.
+          </div>
+          <div className="slider-row">
+            <span className="slider-label">Formato</span>
+            <select 
+              value={store.aspectRatio} 
+              onChange={e => store.setAspectRatio(e.target.value as any)}
+              style={{ flex: 1, fontSize: 11, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '4px' }}
+            >
+              <option value="original">Original del clip principal</option>
+              <option value="16:9">16:9 (YouTube, apaisado)</option>
+              <option value="9:16">9:16 (TikTok, Shorts, Reels)</option>
+              <option value="1:1">1:1 (Instagram Cuadrado)</option>
+              <option value="4:3">4:3 (Clásico)</option>
+            </select>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   const sourceClip = store.clips.find(c => c.id === selectedClip.sourceClipId)
 
   return (
@@ -145,21 +221,8 @@ export default function EffectsPanel() {
           {sourceClip?.fps ? ` ${sourceClip.fps}fps` : ''}
         </div>
         
-        <div className="slider-row">
-          <span className="slider-label">Velocidad</span>
-          <select 
-            value={String(selectedClip.playbackRate || 1)} 
-            onChange={e => store.updateTimelineClip(selectedClip.id, { playbackRate: parseFloat(e.target.value) })}
-            style={{ flex: 1, fontSize: 11, background: 'var(--bg-elevated)', color: 'var(--text-primary)', border: '1px solid var(--border)', borderRadius: 4, padding: '2px 4px' }}
-          >
-            <option value="0.25">0.25x</option>
-            <option value="0.5">0.5x</option>
-            <option value="1">1.0x (Normal)</option>
-            <option value="1.5">1.5x</option>
-            <option value="2">2.0x</option>
-            <option value="4">4.0x</option>
-          </select>
-        </div>
+        <SliderRow label="Velocidad" value={selectedClip.playbackRate || 1} min={0.1} max={4} step={0.05}
+          onChange={v => store.updateTimelineClip(selectedClip.id, { playbackRate: v })} />
       </div>
 
       {/* Audio */}

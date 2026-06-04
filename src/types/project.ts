@@ -1,6 +1,7 @@
 export type EffectType =
   | 'blackAndWhite'
   | 'filmNoise'
+  | 'noise'
   | 'vignette'
   | 'brightness'
   | 'saturation'
@@ -53,6 +54,20 @@ export interface TimelineClip {
   track: 'video' | 'audio'
 }
 
+export interface TextClip {
+  id: string
+  text: string
+  startTime: number
+  duration: number
+  x: number           // percentage 0-100 (from left)
+  y: number           // percentage 0-100 (from top)
+  fontSize: number    // pixels or logical unit
+  color: string       // hex color
+  fontFamily?: string // e.g. "Arial", "Impact", "Courier New"
+  scaleX?: number
+  scaleY?: number
+}
+
 export interface ExportSettings {
   format: 'mp4' | 'mov' | 'webm'
   resolution: 'original' | '1080p' | '720p' | '480p'
@@ -68,6 +83,7 @@ export interface HistoryEntry {
   timeline: {
     video: TimelineClip[]
     audio: TimelineClip[]
+    text: TextClip[]
   }
   description: string
 }
@@ -78,12 +94,14 @@ export interface ProjectState {
   timeline: {
     video: TimelineClip[]
     audio: TimelineClip[]
+    text: TextClip[]
   }
   currentTime: number
   duration: number
   selectedClipIds: string[]
   isPlaying: boolean
   exportSettings: ExportSettings
+  aspectRatio: '16:9' | '9:16' | '1:1' | '4:3' | 'original'
   timelineZoom: number
   history: HistoryEntry[]
   historyIndex: number

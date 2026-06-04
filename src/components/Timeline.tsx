@@ -1,7 +1,8 @@
 import { useRef, useCallback, useState, useEffect } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
 import { useFFmpeg } from '../hooks/useFFmpeg'
-import type { TimelineClip } from '../types/project'
+import type { TimelineClip, TextClip } from '../types/project'
+import { v4 as uuidv4 } from 'uuid'
 
 const TRACK_HEIGHT = 52
 const RULER_HEIGHT = 20
@@ -148,6 +149,104 @@ function TimelineClipEl({ clip, pixelsPerSecond }: { clip: TimelineClip; pixelsP
   )
 }
 
+function TextClipEl({ clip, pixelsPerSecond }: { clip: TextClip; pixelsPerSecond: number }) {
+  const store = useProjectStore()
+  const isSelected = store.selectedClipIds.includes(clip.id)
+  const dragRef = useRef<{
+    active: boolean;
+    startX: number;
+    startTimes: Record<string, number>
+  }>({ active: false, startX: 0, startTimes: {} })
+
+  const x = clip.startTime * pixelsPerSecond
+  const w = Math.max(4, clip.duration * pixelsPerSecond)
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    if ((e.target as HTMLElement).classList.contains('clip-trim-handle')) return
+    e.stopPropagation()
+    
+    if (e.ctrlKey) {
+      store.toggleSelectedClipId(clip.id, true)
+    } else {
+      if (!isSelected) {
+        store.toggleSelectedClipId(clip.id, false)
+      }
+    }
+
+    const state = useProjectStore.getState()
+    const idsToMove = state.selectedClipIds.includes(clip.id) ? state.selectedClipIds : [clip.id]
+    const allClips = [...state.timeline.video, ...state.timeline.audio, ...state.timeline.text]
+    
+    const startTimes: Record<string, number> = {}
+    for (const c of allClips) {
+      if (idsToMove.includes(c.id)) startTimes[c.id] = c.startTime
+    }
+
+    dragRef.current = { active: true, startX: e.clientX, startTimes }
+
+    const onMove = (ev: MouseEvent) => {
+      if (!dragRef.current.active) return
+      const dt = (ev.clientX - dragRef.current.startX) / pixelsPerSecond
+      
+      const updates = idsToMove.map(id => ({
+        id,
+        newStartTime: (dragRef.current.startTimes[id] || 0) + dt
+      }))
+      store.moveTimelineClips(updates)
+    }
+    const onUp = () => {
+      if (dragRef.current.active) store.saveHistory('Mover texto')
+      dragRef.current.active = false
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  const handleTrim = (e: React.MouseEvent, side: 'left' | 'right') => {
+    e.stopPropagation()
+    const startX = e.clientX
+    const origDuration = clip.duration
+    const origStart = clip.startTime
+
+    const onMove = (ev: MouseEvent) => {
+      let dt = (ev.clientX - startX) / pixelsPerSecond
+      
+      if (side === 'left') {
+        dt = Math.min(origDuration - 0.1, dt)
+        store.updateTimelineClip(clip.id, {
+          startTime: Math.max(0, origStart + dt),
+          duration: origDuration - dt,
+        } as any)
+      } else {
+        const newDuration = Math.max(0.1, origDuration + dt)
+        store.updateTimelineClip(clip.id, { duration: newDuration } as any)
+      }
+    }
+    const onUp = () => {
+      store.saveHistory('Recortar texto')
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  return (
+    <div
+      className={`timeline-clip text-clip ${isSelected ? 'selected' : ''}`}
+      style={{ left: x, width: w, background: 'linear-gradient(to bottom, #ea580c, #c2410c)', borderTopColor: '#f97316' }}
+      onMouseDown={handleMouseDown}
+      title={clip.text}
+    >
+      <div className="clip-trim-handle left" onMouseDown={e => handleTrim(e, 'left')} />
+      <span className="timeline-clip-label" style={{ fontWeight: 600 }}>T | {clip.text || 'Texto'}</span>
+      <div className="clip-trim-handle right" onMouseDown={e => handleTrim(e, 'right')} />
+    </div>
+  )
+}
+
 export default function Timeline() {
   const store = useProjectStore()
   const { addClipToTimeline } = useFFmpeg()
@@ -246,6 +345,25 @@ export default function Timeline() {
           <button className="btn-icon" style={{ fontSize: 10 }} onClick={store.removeGaps} title="Eliminar huecos">[ ]</button>
         </div>
         <div style={{ flex: 1 }} />
+        <button
+          className="btn btn-ghost"
+          style={{ fontSize: 11, padding: '2px 9px', marginRight: 8, color: '#f97316', borderColor: '#f97316' }}
+          onClick={() => {
+            store.addTextClip({
+              id: uuidv4(),
+              text: 'Nuevo Texto',
+              startTime: store.currentTime,
+              duration: 3,
+              x: 50,
+              y: 50,
+              fontSize: 48,
+              color: '#ffffff'
+            })
+          }}
+          title="Añadir texto en la posición actual"
+        >
+          + Texto
+        </button>
         {store.selectedClipIds.length > 0 && (
           <div style={{ display: 'flex', gap: 4 }}>
             <button
@@ -280,6 +398,7 @@ export default function Timeline() {
         {/* Track labels */}
         <div className="timeline-track-labels">
           <div style={{ height: RULER_HEIGHT, flexShrink: 0, borderBottom: '1px solid var(--border)' }} />
+          <div className="timeline-track-label">Text</div>
           <div className="timeline-track-label">Video</div>
           <div className="timeline-track-label">Audio</div>
         </div>
@@ -288,6 +407,17 @@ export default function Timeline() {
         <div className="timeline-tracks">
           <div ref={trackAreaRef} style={{ width: totalWidth, position: 'relative' }}>
             <TimelineRuler pixelsPerSecond={pps} duration={store.duration} width={containerWidth} />
+
+            {/* Text track */}
+            <div
+              className="timeline-track text-track"
+              style={{ height: TRACK_HEIGHT }}
+              onClick={handleTrackClick}
+            >
+              {store.timeline.text.map(clip => (
+                <TextClipEl key={clip.id} clip={clip} pixelsPerSecond={pps} />
+              ))}
+            </div>
 
             {/* Video track */}
             <div

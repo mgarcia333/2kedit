@@ -23,11 +23,15 @@ function buildCSSStyle(effects: Effect[]): {
   transform: string
   playbackRate: number
   vignetteOpacity: number
+  filmNoiseOpacity: number
+  tvNoiseOpacity: number
 } {
   const filters: string[] = []
   let transform = ''
   let playbackRate = 1
   let vignetteOpacity = 0
+  let filmNoiseOpacity = 0
+  let tvNoiseOpacity = 0
 
   for (const effect of effects) {
     if (!effect.enabled) continue
@@ -38,10 +42,16 @@ function buildCSSStyle(effects: Effect[]): {
       case 'sepia':
         filters.push('sepia(1)')
         break
-      case 'filmNoise':
-        // Film noise can't be done with CSS alone — approximate with contrast
-        filters.push('contrast(1.05)')
+      case 'filmNoise': {
+        const intensity = (effect.params.intensity as number) ?? 20
+        filmNoiseOpacity = intensity / 100 // 0 to 1
         break
+      }
+      case 'noise': {
+        const intensity = (effect.params.intensity as number) ?? 50
+        tvNoiseOpacity = intensity / 100
+        break
+      }
       case 'brightness': {
         const b = (effect.params.brightness as number) ?? 0
         const c = (effect.params.contrast as number) ?? 1
@@ -75,6 +85,8 @@ function buildCSSStyle(effects: Effect[]): {
     transform,
     playbackRate,
     vignetteOpacity,
+    filmNoiseOpacity,
+    tvNoiseOpacity,
   }
 }
 
@@ -94,13 +106,20 @@ export default function PreviewPlayer() {
     return null
   }, [store.currentTime, store.timeline.video])
 
+  // Find active text clips
+  const activeTextClips = useMemo(() => {
+    return store.timeline.text.filter(
+      tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
+    )
+  }, [store.currentTime, store.timeline.text])
+
   const activeSource = useMemo(() => {
     return activeClip ? store.clips.find(c => c.id === activeClip.sourceClipId) ?? null : null
   }, [activeClip, store.clips])
 
   // Compute CSS effects for live preview
   const cssStyle = useMemo(() => {
-    return activeClip ? buildCSSStyle(activeClip.effects) : { filter: 'none', transform: '', playbackRate: 1, vignetteOpacity: 0 }
+    return activeClip ? buildCSSStyle(activeClip.effects) : { filter: 'none', transform: '', playbackRate: 1, vignetteOpacity: 0, filmNoiseOpacity: 0, tvNoiseOpacity: 0 }
   }, [activeClip?.effects])
 
   // Apply CSS filters and playback rate whenever they change
@@ -242,6 +261,76 @@ export default function PreviewPlayer() {
     window.addEventListener('mouseup', onUp)
   }, [store])
 
+  const handleTextMouseDown = (e: React.MouseEvent, tc: any) => {
+    e.stopPropagation()
+    store.setSelectedClipIds([tc.id])
+    
+    const wrap = (e.currentTarget as HTMLElement).closest('.preview-canvas-wrap')
+    if (!wrap) return
+    const rect = wrap.getBoundingClientRect()
+
+    const startX = e.clientX
+    const startY = e.clientY
+    const startObjX = tc.x
+    const startObjY = tc.y
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ((ev.clientX - startX) / rect.width) * 100
+      const dy = ((ev.clientY - startY) / rect.height) * 100
+      store.updateTimelineClip(tc.id, {
+        x: Math.max(0, Math.min(100, startObjX + dx)),
+        y: Math.max(0, Math.min(100, startObjY + dy))
+      } as any)
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
+  const handleTextResizeMouseDown = (e: React.MouseEvent, tc: any, type: 'corner' | 'right' | 'bottom') => {
+    e.stopPropagation()
+    store.setSelectedClipIds([tc.id])
+    
+    const startX = e.clientX
+    const startY = e.clientY
+    const startSize = tc.fontSize
+    const startScaleX = tc.scaleX ?? 1
+    const startScaleY = tc.scaleY ?? 1
+
+    const onMove = (ev: MouseEvent) => {
+      const dx = ev.clientX - startX
+      const dy = ev.clientY - startY
+      
+      if (type === 'corner') {
+        const delta = (dx + dy) / 1.5
+        store.updateTimelineClip(tc.id, {
+          fontSize: Math.max(10, Math.min(400, startSize + delta))
+        } as any)
+      } else if (type === 'right') {
+        // Estirar horizontalmente
+        const scaleDelta = dx / 100 // Factor arbitrario de sensibilidad
+        store.updateTimelineClip(tc.id, {
+          scaleX: Math.max(0.1, Math.min(10, startScaleX + scaleDelta))
+        } as any)
+      } else if (type === 'bottom') {
+        // Estirar verticalmente
+        const scaleDelta = dy / 100
+        store.updateTimelineClip(tc.id, {
+          scaleY: Math.max(0.1, Math.min(10, startScaleY + scaleDelta))
+        } as any)
+      }
+    }
+    const onUp = () => {
+      window.removeEventListener('mousemove', onMove)
+      window.removeEventListener('mouseup', onUp)
+    }
+    window.addEventListener('mousemove', onMove)
+    window.addEventListener('mouseup', onUp)
+  }
+
   const togglePlay = () => store.setPlaying(!store.isPlaying)
   const goToStart  = () => store.setCurrentTime(0)
   const goToEnd    = () => store.setCurrentTime(store.duration)
@@ -252,7 +341,14 @@ export default function PreviewPlayer() {
 
   return (
     <div className="preview-player">
-      <div className="preview-canvas-wrap">
+      <div 
+        className="preview-canvas-wrap" 
+        onMouseDown={() => store.setSelectedClipIds([])}
+        style={{
+          aspectRatio: store.aspectRatio !== 'original' ? store.aspectRatio.replace(':', '/') : undefined,
+          background: store.aspectRatio !== 'original' ? '#000' : undefined
+        }}
+      >
         {activeSource ? (
           <>
             <video
@@ -270,15 +366,136 @@ export default function PreviewPlayer() {
                 }}
               />
             )}
+            
+            {/* Film Noise overlay */}
+            {cssStyle.filmNoiseOpacity > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  opacity: cssStyle.filmNoiseOpacity,
+                  mixBlendMode: 'overlay',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`
+                }}
+              />
+            )}
+            
+            {/* TV Noise overlay */}
+            {cssStyle.tvNoiseOpacity > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  inset: 0,
+                  pointerEvents: 'none',
+                  opacity: cssStyle.tvNoiseOpacity,
+                  mixBlendMode: 'screen',
+                  backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='1' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E")`
+                }}
+              />
+            )}
+            
+            {/* Text Overlays */}
+            {activeTextClips.map(tc => (
+              <div
+                key={tc.id}
+                style={{
+                  position: 'absolute',
+                  left: `${tc.x}%`,
+                  top: `${tc.y}%`,
+                  transform: `translate(-50%, -50%) scale(${tc.scaleX ?? 1}, ${tc.scaleY ?? 1})`,
+                  fontSize: `${tc.fontSize}px`,
+                  color: tc.color,
+                  fontWeight: 'bold',
+                  fontFamily: tc.fontFamily || 'Inter, system-ui, sans-serif',
+                  whiteSpace: 'pre-wrap',
+                  textAlign: 'center',
+                  textShadow: '0px 2px 4px rgba(0,0,0,0.8)',
+                  pointerEvents: 'auto',
+                  cursor: 'move',
+                  zIndex: 10,
+                  outline: store.selectedClipIds.includes(tc.id) ? '2px dashed #f97316' : 'none',
+                  outlineOffset: 4
+                }}
+                onMouseDown={e => handleTextMouseDown(e, tc)}
+              >
+                {tc.text}
+                {store.selectedClipIds.includes(tc.id) && (
+                  <>
+                    {/* General resize */}
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'corner')}
+                      style={{ position: 'absolute', right: -8, bottom: -8, width: 16, height: 16, background: '#f97316', borderRadius: '50%', cursor: 'nwse-resize', border: '2px solid white' }}
+                    />
+                    {/* Horizontal stretch */}
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'right')}
+                      style={{ position: 'absolute', right: -8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 24, background: '#f97316', borderRadius: 4, cursor: 'ew-resize', border: '2px solid white' }}
+                    />
+                    {/* Vertical stretch */}
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'bottom')}
+                      style={{ position: 'absolute', left: '50%', bottom: -8, transform: 'translateX(-50%)', width: 24, height: 12, background: '#f97316', borderRadius: 4, cursor: 'ns-resize', border: '2px solid white' }}
+                    />
+                  </>
+                )}
+              </div>
+            ))}
           </>
         ) : (
-          <div className="preview-placeholder">
-            <div className="preview-placeholder-icon" style={{ fontFamily: 'monospace', fontSize: 11, letterSpacing: 0 }}>
-              VID
+          <>
+            <div className="preview-placeholder">
+              <div className="preview-placeholder-icon" style={{ fontFamily: 'monospace', fontSize: 11, letterSpacing: 0 }}>
+                VID
+              </div>
+              <div>Sin contenido en el timeline</div>
+              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Importa un video y arrastralo al timeline</div>
             </div>
-            <div>Sin contenido en el timeline</div>
-            <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Importa un video y arrastralo al timeline</div>
-          </div>
+            
+            {/* Text Overlays can show even if there is no video! */}
+            {activeTextClips.map(tc => (
+              <div
+                key={tc.id}
+                style={{
+                  position: 'absolute',
+                  left: `${tc.x}%`,
+                  top: `${tc.y}%`,
+                  transform: `translate(-50%, -50%) scale(${tc.scaleX ?? 1}, ${tc.scaleY ?? 1})`,
+                  fontSize: `${tc.fontSize}px`,
+                  color: tc.color,
+                  fontWeight: 'bold',
+                  fontFamily: tc.fontFamily || 'Inter, system-ui, sans-serif',
+                  whiteSpace: 'pre-wrap',
+                  textAlign: 'center',
+                  textShadow: '0px 2px 4px rgba(0,0,0,0.8)',
+                  pointerEvents: 'auto',
+                  cursor: 'move',
+                  zIndex: 10,
+                  outline: store.selectedClipIds.includes(tc.id) ? '2px dashed #f97316' : 'none',
+                  outlineOffset: 4
+                }}
+                onMouseDown={e => handleTextMouseDown(e, tc)}
+              >
+                {tc.text}
+                {store.selectedClipIds.includes(tc.id) && (
+                  <>
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'corner')}
+                      style={{ position: 'absolute', right: -8, bottom: -8, width: 16, height: 16, background: '#f97316', borderRadius: '50%', cursor: 'nwse-resize', border: '2px solid white' }}
+                    />
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'right')}
+                      style={{ position: 'absolute', right: -8, top: '50%', transform: 'translateY(-50%)', width: 12, height: 24, background: '#f97316', borderRadius: 4, cursor: 'ew-resize', border: '2px solid white' }}
+                    />
+                    <div
+                      onMouseDown={e => handleTextResizeMouseDown(e, tc, 'bottom')}
+                      style={{ position: 'absolute', left: '50%', bottom: -8, transform: 'translateX(-50%)', width: 24, height: 12, background: '#f97316', borderRadius: 4, cursor: 'ns-resize', border: '2px solid white' }}
+                    />
+                  </>
+                )}
+              </div>
+            ))}
+          </>
         )}
       </div>
 

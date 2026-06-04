@@ -27,6 +27,7 @@ interface ProjectStore extends ProjectState {
 
   // Timeline management
   addToTimeline: (clip: TimelineClip) => void
+  addTextClip: (clip: TextClip) => void
   removeFromTimeline: (id: string) => void
   removeTimelineClips: (ids: string[]) => void
   updateTimelineClip: (id: string, changes: Partial<TimelineClip>) => void
@@ -55,6 +56,7 @@ interface ProjectStore extends ProjectState {
 
   // Export
   setExportSettings: (settings: Partial<ExportSettings>) => void
+  setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3' | 'original') => void
 
   // App state
   setFFmpegAvailable: (available: boolean) => void
@@ -71,7 +73,8 @@ interface ProjectStore extends ProjectState {
 function getEffectLabel(type: EffectType): string {
   const labels: Record<EffectType, string> = {
     blackAndWhite: 'Blanco y Negro',
-    filmNoise: 'Ruido de Película',
+    filmNoise: 'Granulado de Película',
+    noise: 'Ruido Digital',
     vignette: 'Viñeta',
     brightness: 'Brillo / Contraste',
     saturation: 'Saturación',
@@ -87,6 +90,7 @@ function getDefaultParams(type: EffectType): Record<string, number | string | bo
   const defaults: Record<EffectType, Record<string, number | string | boolean>> = {
     blackAndWhite: {},
     filmNoise: { intensity: 20 },
+    noise: { intensity: 50 },
     vignette: { intensity: 0.5 },
     brightness: { brightness: 0, contrast: 1 },
     saturation: { saturation: 1 },
@@ -98,8 +102,8 @@ function getDefaultParams(type: EffectType): Record<string, number | string | bo
   return defaults[type] || {}
 }
 
-function computeTimelineDuration(timeline: { video: TimelineClip[]; audio: TimelineClip[] }): number {
-  const allClips = [...timeline.video, ...timeline.audio]
+function computeTimelineDuration(timeline: { video: TimelineClip[]; audio: TimelineClip[]; text: TextClip[] }): number {
+  const allClips = [...timeline.video, ...timeline.audio, ...timeline.text]
   if (allClips.length === 0) return 0
   return Math.max(...allClips.map(c => c.startTime + c.duration))
 }
@@ -108,16 +112,17 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   // Initial state
   name: 'Proyecto sin título',
   clips: [],
-  timeline: { video: [], audio: [] },
+  timeline: { video: [], audio: [], text: [] },
   currentTime: 0,
   duration: 0,
   selectedClipIds: [],
   isPlaying: false,
   exportSettings: DEFAULT_EXPORT_SETTINGS,
+  aspectRatio: 'original',
   timelineZoom: 1,
   history: [{
     clips: [],
-    timeline: { video: [], audio: [] },
+    timeline: { video: [], audio: [], text: [] },
     description: 'Estado Inicial',
   }],
   historyIndex: 0,
@@ -131,28 +136,50 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   },
 
   removeClip: (id) => {
-    set(state => ({
-      clips: state.clips.filter(c => c.id !== id),
-      timeline: {
+    set(state => {
+      const newTimeline = {
         video: state.timeline.video.filter(c => c.sourceClipId !== id),
         audio: state.timeline.audio.filter(c => c.sourceClipId !== id),
-      },
-    }))
+        text: state.timeline.text,
+      }
+      return {
+        clips: state.clips.filter(c => c.id !== id),
+        timeline: newTimeline,
+        duration: computeTimelineDuration(newTimeline),
+      }
+    })
   },
 
   // Timeline management
   addToTimeline: (clip) => {
     set(state => {
       const newTimeline = {
-        ...state.timeline,
-        [clip.track]: [...state.timeline[clip.track], clip],
+        video: [...state.timeline.video],
+        audio: [...state.timeline.audio],
+        text: [...state.timeline.text]
+      }
+      newTimeline[clip.track].push(clip)
+      return {
+        timeline: newTimeline,
+        duration: computeTimelineDuration(newTimeline),
+      }
+    })
+    get().saveHistory('Añadir al timeline')
+  },
+
+  addTextClip: (clip) => {
+    set(state => {
+      const newTimeline = {
+        video: [...state.timeline.video],
+        audio: [...state.timeline.audio],
+        text: [...state.timeline.text, clip]
       }
       return {
         timeline: newTimeline,
         duration: computeTimelineDuration(newTimeline),
       }
     })
-    get().saveHistory(`Añadir clip al timeline`)
+    get().saveHistory('Añadir texto')
   },
 
   removeFromTimeline: (id) => {
@@ -160,6 +187,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const newTimeline = {
         video: state.timeline.video.filter(c => c.id !== id),
         audio: state.timeline.audio.filter(c => c.id !== id),
+        text: state.timeline.text.filter(c => c.id !== id),
       }
       return {
         timeline: newTimeline,
@@ -176,6 +204,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const newTimeline = {
         video: state.timeline.video.filter(c => !ids.includes(c.id)),
         audio: state.timeline.audio.filter(c => !ids.includes(c.id)),
+        text: state.timeline.text.filter(c => !ids.includes(c.id)),
       }
       return {
         timeline: newTimeline,
@@ -188,11 +217,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   updateTimelineClip: (id, changes) => {
     set(state => {
-      const updateTrack = (track: TimelineClip[]) =>
-        track.map(c => c.id === id ? { ...c, ...changes } : c)
+      const updateTrack = (track: TimelineClip[]) => track.map(c => c.id === id ? { ...c, ...changes } : c)
+      const updateTextTrack = (track: TextClip[]) => track.map(c => c.id === id ? { ...c, ...changes } : c)
       const newTimeline = {
         video: updateTrack(state.timeline.video),
         audio: updateTrack(state.timeline.audio),
+        text: updateTextTrack(state.timeline.text),
       }
       return {
         timeline: newTimeline,
@@ -203,11 +233,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
 
   moveTimelineClip: (id, newStartTime) => {
     set(state => {
-      const updateTrack = (track: TimelineClip[]) =>
-        track.map(c => c.id === id ? { ...c, startTime: Math.max(0, newStartTime) } : c)
+      const updateTrack = (track: TimelineClip[]) => track.map(c => c.id === id ? { ...c, startTime: Math.max(0, newStartTime) } : c)
+      const updateTextTrack = (track: TextClip[]) => track.map(c => c.id === id ? { ...c, startTime: Math.max(0, newStartTime) } : c)
       const newTimeline = {
         video: updateTrack(state.timeline.video),
         audio: updateTrack(state.timeline.audio),
+        text: updateTextTrack(state.timeline.text),
       }
       return {
         timeline: newTimeline,
@@ -220,11 +251,12 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     if (updates.length === 0) return
     set(state => {
       const updateMap = new Map(updates.map(u => [u.id, Math.max(0, u.newStartTime)]))
-      const updateTrack = (track: TimelineClip[]) =>
-        track.map(c => updateMap.has(c.id) ? { ...c, startTime: updateMap.get(c.id)! } : c)
+      const updateTrack = (track: TimelineClip[]) => track.map(c => updateMap.has(c.id) ? { ...c, startTime: updateMap.get(c.id)! } : c)
+      const updateTextTrack = (track: TextClip[]) => track.map(c => updateMap.has(c.id) ? { ...c, startTime: updateMap.get(c.id)! } : c)
       const newTimeline = {
         video: updateTrack(state.timeline.video),
         audio: updateTrack(state.timeline.audio),
+        text: updateTextTrack(state.timeline.text),
       }
       return {
         timeline: newTimeline,
@@ -366,8 +398,14 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   setTimelineZoom: (zoom) => set({ timelineZoom: Math.max(0.1, Math.min(10, zoom)) }),
 
   // Export
-  setExportSettings: (settings) =>
-    set(state => ({ exportSettings: { ...state.exportSettings, ...settings } })),
+  setExportSettings: (settings) => {
+    set(state => ({ exportSettings: { ...state.exportSettings, ...settings } }))
+  },
+
+  setAspectRatio: (ratio) => {
+    set({ aspectRatio: ratio })
+    get().saveHistory(`Cambiar resolución a ${ratio}`)
+  },
 
   // App state
   setFFmpegAvailable: (available) => set({ ffmpegAvailable: available }),
