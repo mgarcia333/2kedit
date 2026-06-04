@@ -179,11 +179,11 @@ export default function EffectsPanel() {
   if (!selectedClip) {
     return (
       <div className="effects-panel">
-        <div className="panel-header">Ajustes del Proyecto</div>
+        <div className="panel-header" style={{ color: 'var(--accent)' }}>Efectos Globales</div>
         <div className="effects-section">
-          <div className="effects-section-title">Resolución y Bordes</div>
+          <div className="effects-section-title">Resolucion y Cintas Negras</div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
-            Configura el formato del lienzo (aspect ratio). Añadirá bordes negros al exportar si es necesario.
+            Añade barras negras y ajusta el lienzo a todos los clips por igual.
           </div>
           <div className="slider-row">
             <span className="slider-label">Formato</span>

@@ -15,7 +15,7 @@ function formatDuration(s: number): string {
 function MediaItem({ clip }: { clip: MediaClip }) {
   const store = useProjectStore()
   const { addClipToTimeline } = useFFmpeg()
-  const isSelected = store.selectedClipId === clip.id
+  const isSelected = store.selectedClipIds.includes(clip.id)
 
   const handleDragStart = (e: React.DragEvent) => {
     e.dataTransfer.setData('application/2kedit-clip', clip.id)
@@ -27,7 +27,7 @@ function MediaItem({ clip }: { clip: MediaClip }) {
       className={`media-item ${isSelected ? 'selected' : ''}`}
       draggable
       onDragStart={handleDragStart}
-      onClick={() => store.setSelectedClipId(clip.id)}
+      onClick={() => store.setSelectedClipIds([clip.id])}
       onDoubleClick={() => addClipToTimeline(clip)}
       title={`${clip.fileName}\nDoble clic para añadir al timeline`}
     >

@@ -126,84 +126,100 @@ function AudioTrackPlayer({ tc }: { tc: TimelineClip }) {
 
 export default function PreviewPlayer() {
   const store = useProjectStore()
-  
-  // Dual video players for seamless transitions
-  const videoA = useRef<HTMLVideoElement>(null)
-  const videoB = useRef<HTMLVideoElement>(null)
-  
-  // Track which timeline clip ID is currently loaded in which player
-  const loadedClips = useRef<{ A: string | null, B: string | null }>({ A: null, B: null })
-  // Track which player is currently active
-  const activePlayerRef = useRef<'A' | 'B' | null>(null)
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const lastSrcRef = useRef<string>('')
+  const seekAfterLoadRef = useRef<number | null>(null)
 
-  // Determine active text/audio clips for rendering
-  const activeTextClips = useMemo(() => store.timeline.text.filter(
-    tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
-  ), [store.currentTime, store.timeline.text])
+  // Find which timeline clip corresponds to current playhead time
+  const activeClip = useMemo(() => {
+    for (const tc of store.timeline.video) {
+      if (store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration) {
+        return tc
+      }
+    }
+    return null
+  }, [store.currentTime, store.timeline.video])
 
-  const activeAudioClips = useMemo(() => store.timeline.audio.filter(
-    tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
-  ), [store.currentTime, store.timeline.audio])
+  // Find active text clips
+  const activeTextClips = useMemo(() => {
+    return store.timeline.text.filter(
+      tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
+    )
+  }, [store.currentTime, store.timeline.text])
 
-  const activeClip = useMemo(() => store.timeline.video.find(
-    tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
-  ), [store.currentTime, store.timeline.video])
+  // Find active audio clips
+  const activeAudioClips = useMemo(() => {
+    return store.timeline.audio.filter(
+      tc => store.currentTime >= tc.startTime && store.currentTime < tc.startTime + tc.duration
+    )
+  }, [store.currentTime, store.timeline.audio])
 
   const activeSource = useMemo(() => {
     return activeClip ? store.clips.find(c => c.id === activeClip.sourceClipId) ?? null : null
   }, [activeClip, store.clips])
 
+  // Compute CSS effects for live preview
   const cssStyle = useMemo(() => {
     return activeClip ? buildCSSStyle(activeClip.effects) : { filter: 'none', transform: '', playbackRate: 1, vignetteOpacity: 0, filmNoiseOpacity: 0, tvNoiseOpacity: 0 }
   }, [activeClip?.effects])
 
-  // Sync players function called on every frame during playback or on scrub
-  const syncPlayers = useCallback((globalTime: number) => {
-    const state = useProjectStore.getState()
-    const activeClip = state.timeline.video.find(tc => globalTime >= tc.startTime && globalTime < tc.startTime + tc.duration)
-    const nextClip = state.timeline.video.find(tc => activeClip && tc.startTime >= activeClip.startTime + activeClip.duration)
+  // Apply CSS filters and playback rate whenever they change
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+    video.style.filter = cssStyle.filter
+    video.style.transform = cssStyle.transform || ''
+    video.playbackRate = activeClip?.playbackRate || 1
+  }, [cssStyle, activeClip?.playbackRate])
 
-    let activeId: 'A' | 'B' | null = null
-    let activeVideo: HTMLVideoElement | null = null
+  // Load video src when active source changes
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
 
-    if (activeClip) {
-      if (loadedClips.current.A === activeClip.id) {
-        activeId = 'A'; activeVideo = videoA.current
-      } else if (loadedClips.current.B === activeClip.id) {
-        activeId = 'B'; activeVideo = videoB.current
-      } else {
-        const source = state.clips.find(c => c.id === activeClip.sourceClipId)
-        if (source) {
-          activeId = loadedClips.current.A !== nextClip?.id ? 'A' : 'B'
-          activeVideo = activeId === 'A' ? videoA.current : videoB.current
-          loadedClips.current[activeId] = activeClip.id
-          if (activeVideo) {
-            activeVideo.src = toFileUrl(source.filePath)
-          }
-        }
-      }
+    if (!activeSource) {
+      video.src = ''
+      lastSrcRef.current = ''
+      return
     }
 
-    if (nextClip) {
-      const otherId = activeId === 'A' ? 'B' : 'A'
-      const otherVideo = otherId === 'A' ? videoA.current : videoB.current
-      if (loadedClips.current[otherId] !== nextClip.id) {
-        loadedClips.current[otherId] = nextClip.id
-        const source = state.clips.find(c => c.id === nextClip.sourceClipId)
-        if (otherVideo && source) {
-          otherVideo.src = toFileUrl(source.filePath)
-          otherVideo.currentTime = nextClip.trimStart
-          otherVideo.pause()
-        }
+    const fileUrl = toFileUrl(activeSource.filePath)
+
+    if (fileUrl !== lastSrcRef.current || video.src !== fileUrl) {
+      lastSrcRef.current = fileUrl
+      // Calculate where to seek after load
+      const localTime = activeClip ? (store.currentTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart : 0
+      seekAfterLoadRef.current = localTime
+
+      video.src = fileUrl
+      video.load()
+    }
+  }, [activeSource?.filePath, store.historyIndex]) // Added historyIndex so it reloads src if history changes or load happens
+
+  // Seek after metadata loaded
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video) return
+
+    const onLoaded = () => {
+      if (seekAfterLoadRef.current !== null) {
+        video.currentTime = seekAfterLoadRef.current
+        seekAfterLoadRef.current = null
       }
     }
-
-    if (videoA.current) videoA.current.style.opacity = activeId === 'A' ? '1' : '0'
-    if (videoB.current) videoB.current.style.opacity = activeId === 'B' ? '1' : '0'
-
-    activePlayerRef.current = activeId
-    return { activeVideo, activeClip }
+    video.addEventListener('loadedmetadata', onLoaded)
+    return () => video.removeEventListener('loadedmetadata', onLoaded)
   }, [])
+
+  // Sync scrubber position -> video time (when not playing)
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || store.isPlaying || !activeClip) return
+    const localTime = (store.currentTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
+    if (Math.abs(video.currentTime - localTime) > 0.08) {
+      video.currentTime = Math.max(0, localTime)
+    }
+  }, [store.currentTime, activeClip, store.isPlaying])
 
   // Update store time while video plays
   useEffect(() => {
@@ -217,35 +233,44 @@ export default function PreviewPlayer() {
       lastTime = now
 
       const state = useProjectStore.getState()
+      const video = videoRef.current
+      
       let newGlobalTime = state.currentTime
       
-      const { activeVideo, activeClip } = syncPlayers(newGlobalTime)
+      // Determine active clip dynamically to avoid stale closures
+      const currentActiveClip = state.timeline.video.find(
+        tc => state.currentTime >= tc.startTime && state.currentTime < tc.startTime + tc.duration
+      )
 
-      if (activeClip && activeVideo) {
-        if (activeVideo.readyState >= 3) {
+      if (currentActiveClip && video) {
+        // If video is loaded enough to play
+        if (video.readyState >= 3) {
           if (state.isBuffering) state.setIsBuffering(false)
-          const expectedLocalTime = (newGlobalTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
+          const expectedLocalTime = (newGlobalTime - currentActiveClip.startTime) * currentActiveClip.playbackRate + currentActiveClip.trimStart
           
-          if (Math.abs(activeVideo.currentTime - expectedLocalTime) > 0.25) {
-            activeVideo.currentTime = Math.max(0, expectedLocalTime)
+          // Force sync if drifted too much
+          if (Math.abs(video.currentTime - expectedLocalTime) > 0.25) {
+            video.currentTime = Math.max(0, expectedLocalTime)
           }
 
-          if (activeVideo.paused && state.isPlaying) {
-            activeVideo.play().catch(() => {})
+          if (video.paused && store.isPlaying) {
+            video.play().catch(() => {})
           }
           
           newGlobalTime += dt
         } else {
+          // Video is buffering or loading a new clip. 
+          // We do NOT advance newGlobalTime, so the playhead pauses and waits for the video.
           if (!state.isBuffering) state.setIsBuffering(true)
         }
       } else {
+        // Empty space on timeline (no video clip)
         if (state.isBuffering) state.setIsBuffering(false)
         newGlobalTime += dt
+        if (video && !video.paused) {
+          video.pause()
+        }
       }
-
-      // Ensure inactive video is paused
-      const inactiveVideo = activePlayerRef.current === 'A' ? videoB.current : videoA.current
-      if (inactiveVideo && !inactiveVideo.paused) inactiveVideo.pause()
 
       if (newGlobalTime >= state.duration) {
         state.setCurrentTime(state.duration)
@@ -259,44 +284,24 @@ export default function PreviewPlayer() {
 
     reqId = requestAnimationFrame(loop)
     return () => cancelAnimationFrame(reqId)
-  }, [store.isPlaying, syncPlayers])
-
-  // Sync scrubber position when NOT playing
-  useEffect(() => {
-    if (store.isPlaying) return
-    const { activeVideo, activeClip } = syncPlayers(store.currentTime)
-    if (activeVideo && activeClip) {
-      const expectedLocalTime = (store.currentTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
-      if (Math.abs(activeVideo.currentTime - expectedLocalTime) > 0.08) {
-        activeVideo.currentTime = Math.max(0, expectedLocalTime)
-      }
-    }
-  }, [store.currentTime, store.isPlaying, syncPlayers])
-
-  // Stop everything if paused
-  useEffect(() => {
-    if (!store.isPlaying) {
-      if (videoA.current && !videoA.current.paused) videoA.current.pause()
-      if (videoB.current && !videoB.current.paused) videoB.current.pause()
-    }
   }, [store.isPlaying])
 
-  // Apply CSS filters, volume, and playbackRate
+  // Play / pause is now handled by the loop and the state
   useEffect(() => {
-    const applyEffects = (video: HTMLVideoElement | null, clipId: string | null) => {
-      if (!video || !clipId) return
-      const clip = store.timeline.video.find(c => c.id === clipId)
-      if (!clip) return
-      const style = buildCSSStyle(clip.effects)
-      video.style.filter = style.filter
-      video.style.transform = style.transform || ''
-      video.playbackRate = clip.playbackRate || 1
-      video.muted = clip.muted || store.globalMute
-      video.volume = Math.min(1, clip.volume || 1)
+    const video = videoRef.current
+    if (!video || !activeSource) return
+    if (!store.isPlaying && !video.paused) {
+      video.pause()
     }
-    applyEffects(videoA.current, loadedClips.current.A)
-    applyEffects(videoB.current, loadedClips.current.B)
-  }) // Runs after every render
+  }, [store.isPlaying, activeSource])
+
+  // Mute / volume
+  useEffect(() => {
+    const video = videoRef.current
+    if (!video || !activeClip) return
+    video.muted = activeClip.muted || store.globalMute
+    video.volume = Math.min(1, activeClip.volume)
+  }, [activeClip?.muted, activeClip?.volume, store.globalMute])
 
   const handleProgressMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (store.duration <= 0) return
@@ -410,18 +415,10 @@ export default function PreviewPlayer() {
         {activeSource ? (
           <>
             <video
-              ref={videoA}
+              ref={videoRef}
               className="preview-video"
               preload="auto"
               playsInline
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, transition: 'none' }}
-            />
-            <video
-              ref={videoB}
-              className="preview-video"
-              preload="auto"
-              playsInline
-              style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', opacity: 0, transition: 'none' }}
             />
             {/* Vignette overlay */}
             {cssStyle.vignetteOpacity > 0 && (
