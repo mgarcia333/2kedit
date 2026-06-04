@@ -1,0 +1,28 @@
+appId: com.twokedit.app
+productName: 2kedit
+directories:
+  output: dist-electron
+files:
+  - "dist/**/*"
+  - "electron/**/*"
+  - "package.json"
+  - "!src/**"
+  - "!electron-src/**"
+extraResources:
+  - from: public/ffmpeg/
+    to: ffmpeg/
+    filter:
+      - "ffmpeg.exe"
+      - "ffprobe.exe"
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: public/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: 2kedit

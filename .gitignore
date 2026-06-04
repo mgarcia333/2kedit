@@ -1,0 +1,47 @@
+# ── Dependencias ────────────────────────────────────────
+node_modules/
+
+# ── Builds / compilados (se regeneran con npm run build) ─
+dist/
+dist-electron/
+electron/
+
+# ── FFmpeg binarios (son grandes, ~200MB cada uno)
+# El usuario los descarga con: npm run download-ffmpeg
+public/ffmpeg/ffmpeg.exe
+public/ffmpeg/ffprobe.exe
+public/ffmpeg/*.zip
+public/ffmpeg/temp/
+
+# ── Logs ────────────────────────────────────────────────
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# ── Sistema operativo ───────────────────────────────────
+.DS_Store
+.DS_Store?
+._*
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# ── IDEs / editores ─────────────────────────────────────
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# ── Variables de entorno (si se añaden en el futuro) ────
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# ── Temporales de Electron ──────────────────────────────
+out/
