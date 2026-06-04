@@ -76,7 +76,7 @@ export default function TopBar({ onExport }: TopBarProps) {
   return (
     <div className="topbar">
       <div className="topbar-logo">
-        <div className="topbar-logo-mark">2K</div>
+        <img src="/app-icon.jpg" alt="Logo" style={{ width: 20, height: 20, objectFit: 'cover', border: '1px solid var(--border-light)', boxShadow: '1px 1px 0 var(--border-dark)' }} />
         <span>2kedit</span>
       </div>
 

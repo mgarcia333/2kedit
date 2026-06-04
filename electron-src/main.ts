@@ -38,7 +38,7 @@ function createWindow(): void {
       nodeIntegration: false,
       webSecurity: false, // Allow local file access for video preview
     },
-    icon: path.join(__dirname, '../../public/icon.ico'),
+    icon: path.join(__dirname, '../public/icon.ico'),
     show: false,
   })
 

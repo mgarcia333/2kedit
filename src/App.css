@@ -33,16 +33,10 @@
   font-weight: bold; font-size: 11px;
   color: var(--text-primary);
 }
-.topbar-logo-mark {
-  width: 16px; height: 16px; border: 1px solid var(--border-dark);
-  background: var(--accent);
-  display: flex; align-items: center; justify-content: center;
-  font-size: 9px; font-weight: bold; color: var(--accent-text);
-}
 .topbar-project-name {
   background: transparent; border: 1px solid transparent;
   color: var(--text-primary); font-family: 'Tahoma', sans-serif;
-  font-size: 11px; font-weight: normal; outline: none; cursor: text;
+  font-size: 11px; font-weight: normal; outline: none; cursor: url('/cursor-text.svg') 5 10, text;
   min-width: 100px; max-width: 200px; padding: 2px 4px;
 }
 .topbar-project-name:hover { border-color: var(--border-shadow); }
@@ -60,7 +54,7 @@
 .window-controls { display: flex; gap: 2px; margin-left: 6px; }
 .win-btn {
   width: 20px; height: 20px; border-radius: 0;
-  background: var(--bg-surface); color: var(--text-primary); cursor: pointer;
+  background: var(--bg-surface); color: var(--text-primary); cursor: url('/cursor-hand.svg') 6 1, pointer;
   display: flex; align-items: center; justify-content: center;
   font-size: 11px; transition: none; font-family: 'Tahoma', sans-serif; font-weight: bold;
   border-top: 1px solid var(--border-light);
@@ -103,7 +97,7 @@
   display: flex; align-items: center; gap: 6px;
   padding: 4px; border-radius: 0;
   background: transparent; border: 1px dotted transparent;
-  cursor: grab; transition: none;
+  cursor: url('/cursor-grab.svg') 7 7, grab; transition: none;
 }
 .media-item:hover { background: var(--bg-hover); }
 .media-item.selected { 
@@ -113,7 +107,7 @@
 }
 .media-item.selected .media-name { color: var(--accent-text); }
 .media-item.selected .media-meta { color: #cccccc; }
-.media-item:active { cursor: grabbing; }
+.media-item:active { cursor: url('/cursor-grabbing.svg') 7 7, grabbing; }
 .media-thumb {
   width: 40px; height: 30px; border-radius: 0;
   background: var(--bg-surface); flex-shrink: 0;
@@ -130,7 +124,7 @@
 .media-meta { font-size: 10px; color: var(--text-dim); margin-top: 1px; font-family: 'JetBrains Mono', monospace; }
 .media-add-btn {
   opacity: 0; width: 20px; height: 20px; border-radius: 3px; border: 1px solid var(--border-light);
-  background: var(--bg-hover); color: var(--text-primary); cursor: pointer; font-size: 13px; font-weight: 300;
+  background: var(--bg-hover); color: var(--text-primary); cursor: url('/cursor-hand.svg') 6 1, pointer; font-size: 13px; font-weight: 300;
   display: flex; align-items: center; justify-content: center; transition: opacity 0.12s; flex-shrink: 0;
 }
 .media-item:hover .media-add-btn { opacity: 1; }
@@ -180,7 +174,7 @@
   border-right: 1px solid var(--border-light);
   border-bottom: 1px solid var(--border-light);
   box-shadow: inset 1px 1px 0 var(--border-shadow);
-  cursor: pointer; position: relative;
+  cursor: url('/cursor-hand.svg') 6 1, pointer; position: relative;
 }
 .preview-progress:hover { border-color: var(--border-dark); }
 .preview-progress-fill {
@@ -231,7 +225,7 @@
 .add-effect-btn {
   display: flex; align-items: center; justify-content: center; gap: 6px;
   padding: 4px; border-radius: 0; 
-  background: var(--bg-surface); color: var(--text-primary); cursor: default;
+  background: var(--bg-surface); color: var(--text-primary); cursor: url('/cursor-arrow.svg') 1 1, default;
   font-size: 11px; width: 100%; margin-top: 5px; font-family: 'Tahoma', sans-serif;
   border-top: 1px solid var(--border-light);
   border-left: 1px solid var(--border-light);
@@ -258,7 +252,7 @@
   min-width: 175px; padding: 2px; z-index: 200;
 }
 .effect-picker-item {
-  padding: 4px 6px; font-size: 11px; cursor: default; transition: none;
+  padding: 4px 6px; font-size: 11px; cursor: url('/cursor-arrow.svg') 1 1, default; transition: none;
   color: var(--text-primary); border: 1px dotted transparent;
 }
 .effect-picker-item:hover { 
@@ -316,7 +310,7 @@
 .timeline-scrubber {
   position: absolute; top: 0; bottom: 0; width: 1px;
   background: var(--text-primary);
-  margin-left: -1px; z-index: 20; cursor: ew-resize;
+  margin-left: -1px; z-index: 20; cursor: url('/cursor-ew-resize.svg') 11 5, ew-resize;
 }
 .timeline-scrubber::before {
   content: ''; position: absolute; top: -5px; left: -5px;
@@ -328,13 +322,13 @@
 .timeline-clip {
   position: absolute; top: 2px; bottom: 2px;
   border-radius: 0; display: flex; align-items: center;
-  overflow: hidden; cursor: grab; min-width: 4px;
+  overflow: hidden; cursor: url('/cursor-grab.svg') 7 7, grab; min-width: 4px;
   border-top: 1px solid var(--border-light);
   border-left: 1px solid var(--border-light);
   border-right: 1px solid var(--border-dark);
   border-bottom: 1px solid var(--border-dark);
 }
-.timeline-clip:active { cursor: grabbing; }
+.timeline-clip:active { cursor: url('/cursor-grabbing.svg') 7 7, grabbing; }
 .timeline-clip.video-clip {
   background: var(--clip-video); 
 }
@@ -354,7 +348,7 @@
 }
 .clip-trim-handle {
   position: absolute; top: 0; bottom: 0; width: 5px;
-  background: rgba(0,0,0,0.1); cursor: ew-resize; transition: none;
+  background: rgba(0,0,0,0.1); cursor: url('/cursor-ew-resize.svg') 11 5, ew-resize; transition: none;
 }
 .clip-trim-handle:hover { background: rgba(0,0,0,0.3); }
 .clip-trim-handle.left { left: 0; }
@@ -367,7 +361,7 @@
 .export-pill {
   padding: 4px 11px; border-radius: 3px; border: 1px solid var(--border);
   background: var(--bg-elevated); color: var(--text-muted);
-  font-size: 11px; cursor: pointer; transition: all 0.12s;
+  font-size: 11px; cursor: url('/cursor-hand.svg') 6 1, pointer; transition: all 0.12s;
 }
 .export-pill:hover { border-color: var(--border-light); color: var(--text-primary); }
 .export-pill.active { border-color: var(--accent-dim); background: var(--bg-hover); color: var(--accent); }
@@ -382,3 +376,4 @@
   border-radius: 6px; padding: 14px 18px; max-width: 360px;
   box-shadow: 0 8px 30px rgba(0,0,0,0.6); animation: slideUp 0.25s ease;
 }
+

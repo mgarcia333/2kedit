@@ -512,12 +512,15 @@ export default function PreviewPlayer() {
           </>
         ) : (
           <>
-            <div className="preview-placeholder">
-              <div className="preview-placeholder-icon" style={{ fontFamily: 'monospace', fontSize: 11, letterSpacing: 0 }}>
-                VID
+            <div className="preview-placeholder" style={{ position: 'relative', overflow: 'hidden', width: '100%', height: '100%' }}>
+              <img src="/bg-empty.png" alt="Empty background" style={{ position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', display: 'block', zIndex: 0, opacity: 0.9 }} />
+              <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 10, background: 'rgba(0,0,0,0.6)', padding: 20, borderRadius: 8, border: '1px solid var(--border-dark)' }}>
+                <div className="preview-placeholder-icon" style={{ fontFamily: 'monospace', fontSize: 11, letterSpacing: 0, color: 'white', borderColor: 'white' }}>
+                  VID
+                </div>
+                <div style={{ color: 'white', fontWeight: 'bold' }}>No content in timeline</div>
+                <div style={{ fontSize: 10, color: '#ccc' }}>Import a video and drag it to the timeline</div>
               </div>
-              <div>Sin contenido en el timeline</div>
-              <div style={{ fontSize: 10, color: 'var(--text-dim)' }}>Importa un video y arrastralo al timeline</div>
             </div>
             
             {/* Text Overlays can show even if there is no video! */}
