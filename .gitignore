@@ -45,3 +45,7 @@ Desktop.ini
 
 # ── Temporales de Electron ──────────────────────────────
 out/
+
+# ── Cloudflare Workers / wrangler ───────────────────────
+.wrangler/
+.dev.vars
