@@ -614,9 +614,18 @@ export default function PreviewPlayer() {
           className={`btn-icon ${store.isPlaying ? 'active' : ''}`}
           onClick={togglePlay}
           title="Play/Pause (Espacio)"
-          style={{ width: 30, height: 30, border: '1px solid var(--border-light)', fontSize: 12 }}
+          style={{ width: 30, height: 30, border: '1px solid var(--border-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          {store.isPlaying ? '||' : '>'}
+          {store.isPlaying ? (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <rect x="4" y="3" width="6" height="18" />
+              <rect x="14" y="3" width="6" height="18" />
+            </svg>
+          ) : (
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+              <path d="M5 3l16 9-16 9z" />
+            </svg>
+          )}
         </button>
         <button className="btn-icon" onClick={frameNext} title="Frame siguiente (→)">&gt;</button>
         <button className="btn-icon" onClick={goToEnd} title="Final">&gt;|</button>
