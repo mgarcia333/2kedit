@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
-import type { Effect, MediaClip } from '../types/project'
+import type { Effect, MediaClip, TimelineClip } from '../types/project'
 
 function formatTimecode(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) seconds = 0
@@ -91,6 +91,7 @@ function buildCSSStyle(effects: Effect[]): {
     playbackRate,
     vignetteOpacity,
     filmNoiseOpacity,
+    tvNoiseOpacity,
   }
 }
 
@@ -140,6 +141,9 @@ export default function PreviewPlayer() {
   const loadedClips = useRef<{ A: string | null, B: string | null }>({ A: null, B: null })
   // Track which player is currently active
   const activePlayerRef = useRef<'A' | 'B' | null>(null)
+  // Watchdog: how long the active clip has been stuck buffering, to detect and
+  // recover from a video element that got wedged mid-load (e.g. from fast scrubbing).
+  const stallRef = useRef<{ clipId: string, since: number } | null>(null)
 
   // Determine active text/audio clips for rendering
   const activeTextClips = useMemo(() => store.timeline.text.filter(
@@ -184,6 +188,8 @@ export default function PreviewPlayer() {
           loadedClips.current[activeId] = activeClip.id
           if (activeVideo) {
             activeVideo.src = resolveMediaSrc(source)
+            const target = (globalTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
+            activeVideo.currentTime = Math.max(0, target)
           }
         }
       }
@@ -229,8 +235,9 @@ export default function PreviewPlayer() {
       if (activeClip && activeVideo) {
         if (activeVideo.readyState >= 3) {
           if (state.isBuffering) state.setIsBuffering(false)
+          stallRef.current = null
           const expectedLocalTime = (newGlobalTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart
-          
+
           if (Math.abs(activeVideo.currentTime - expectedLocalTime) > 0.25) {
             activeVideo.currentTime = Math.max(0, expectedLocalTime)
           }
@@ -238,13 +245,29 @@ export default function PreviewPlayer() {
           if (activeVideo.paused && state.isPlaying) {
             activeVideo.play().catch(() => {})
           }
-          
+
           newGlobalTime += dt
         } else {
           if (!state.isBuffering) state.setIsBuffering(true)
+          // Watchdog: a video element can get stuck mid-load (e.g. its src was
+          // swapped again before the previous load settled, from fast scrubbing).
+          // If it doesn't reach a playable state within ~1s, force a clean reload
+          // instead of buffering forever.
+          if (stallRef.current?.clipId !== activeClip.id) {
+            stallRef.current = { clipId: activeClip.id, since: now }
+          } else if (now - stallRef.current.since > 1000) {
+            const source = state.clips.find(c => c.id === activeClip.sourceClipId)
+            if (source) {
+              const target = Math.max(0, (newGlobalTime - activeClip.startTime) * activeClip.playbackRate + activeClip.trimStart)
+              activeVideo.src = resolveMediaSrc(source)
+              activeVideo.currentTime = target
+            }
+            stallRef.current = { clipId: activeClip.id, since: now }
+          }
         }
       } else {
         if (state.isBuffering) state.setIsBuffering(false)
+        stallRef.current = null
         newGlobalTime += dt
       }
 
@@ -306,20 +329,41 @@ export default function PreviewPlayer() {
   const handleProgressMouseDown = useCallback((e: React.MouseEvent<HTMLDivElement>) => {
     if (store.duration <= 0) return
     const rect = e.currentTarget.getBoundingClientRect()
-    
-    const updateTime = (clientX: number) => {
-      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+
+    // Throttle to one commit per animation frame: raw mousemove can fire far
+    // faster than the video element can keep up with src swaps, which is what
+    // left playback stuck mid-drag (a wedged, perpetually-buffering element).
+    let rafId: number | null = null
+    let pendingX: number | null = null
+
+    const commit = () => {
+      rafId = null
+      if (pendingX === null) return
+      const ratio = Math.max(0, Math.min(1, (pendingX - rect.left) / rect.width))
       store.setCurrentTime(ratio * store.duration)
+      pendingX = null
     }
-    
+
+    const updateTime = (clientX: number) => {
+      pendingX = clientX
+      if (rafId === null) rafId = requestAnimationFrame(commit)
+    }
+
     updateTime(e.clientX)
-    
+
     const onMove = (ev: MouseEvent) => updateTime(ev.clientX)
     const onUp = () => {
       window.removeEventListener('mousemove', onMove)
       window.removeEventListener('mouseup', onUp)
+      // Flush any pending position instead of dropping it -- otherwise a plain
+      // click (mousedown+mouseup with no movement) gets its scheduled update
+      // cancelled before the animation frame ever fires, and nothing seeks.
+      if (rafId !== null) {
+        cancelAnimationFrame(rafId)
+        commit()
+      }
     }
-    
+
     window.addEventListener('mousemove', onMove)
     window.addEventListener('mouseup', onUp)
   }, [store])

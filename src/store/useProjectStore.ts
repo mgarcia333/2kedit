@@ -4,6 +4,7 @@ import type {
   ProjectState,
   MediaClip,
   TimelineClip,
+  TextClip,
   ExportSettings,
   Effect,
   EffectType,
@@ -58,7 +59,6 @@ interface ProjectStore extends ProjectState {
   // Export
   setExportSettings: (settings: Partial<ExportSettings>) => void
   setAspectRatio: (ratio: '16:9' | '9:16' | '1:1' | '4:3' | 'original') => void
-  setPreviewMedia: (media: { filePath: string, name: string } | null) => void
 
   // App state
   setFFmpegAvailable: (available: boolean) => void
@@ -123,7 +123,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
   exportSettings: DEFAULT_EXPORT_SETTINGS,
   aspectRatio: 'original',
   timelineZoom: 1,
-  previewMedia: null,
   history: [{
     clips: [],
     timeline: { video: [], audio: [], text: [] },
@@ -305,6 +304,7 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
       const newTimeline = {
         video: replaceInTrack(state.timeline.video),
         audio: replaceInTrack(state.timeline.audio),
+        text: state.timeline.text,
       }
 
       return {
@@ -415,7 +415,6 @@ export const useProjectStore = create<ProjectStore>((set, get) => ({
     set({ aspectRatio: ratio })
     get().saveHistory(`Cambiar resolución a ${ratio}`)
   },
-  setPreviewMedia: (media) => set({ previewMedia: media }),
 
   // App state
   setFFmpegAvailable: (available) => set({ ffmpegAvailable: available }),

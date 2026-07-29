@@ -43,12 +43,12 @@ export default function App() {
     if (e.code === 'KeyS' && !e.ctrlKey) {
       e.preventDefault()
       const sel = [...store.timeline.video, ...store.timeline.audio]
-        .find(c => c.id === store.selectedClipId)
+        .find(c => store.selectedClipIds.includes(c.id))
       if (sel) store.splitClip(sel.id, store.currentTime)
     }
     if (e.code === 'Delete') {
       e.preventDefault()
-      if (store.selectedClipId) store.removeFromTimeline(store.selectedClipId)
+      if (store.selectedClipIds.length) store.removeTimelineClips(store.selectedClipIds)
     }
     if (e.ctrlKey && e.code === 'KeyZ') { e.preventDefault(); store.undo() }
     if (e.ctrlKey && e.code === 'KeyY') { e.preventDefault(); store.redo() }
