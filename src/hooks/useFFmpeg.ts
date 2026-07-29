@@ -2,6 +2,9 @@ import { useCallback } from 'react'
 import { v4 as uuidv4 } from 'uuid'
 import { useProjectStore } from '../store/useProjectStore'
 import type { MediaClip, TimelineClip, FFprobeResult } from '../types/project'
+import { probeFileWeb, generateThumbnailWeb } from '../lib/webMedia'
+import { loadFFmpeg, setFFmpegProgressCallback, terminateFFmpeg, fetchFile } from '../lib/webFFmpeg'
+import { registerWebFile, getWebFile } from '../lib/webFileRegistry'
 
 export function useFFmpeg() {
   const store = useProjectStore()
@@ -56,6 +59,78 @@ export function useFFmpeg() {
       }
     }
   }, [store])
+
+  const probeAndImportFiles = useCallback(async (files: File[]) => {
+    for (const file of files) {
+      try {
+        const info = await probeFileWeb(file)
+        const id = uuidv4()
+        const ext = (file.name.split('.').pop() || (info.type === 'video' ? 'mp4' : 'mp3')).toLowerCase()
+        const previewUrl = URL.createObjectURL(file)
+        registerWebFile(id, file)
+
+        const thumbnailPath = info.type === 'video' ? await generateThumbnailWeb(file) : undefined
+
+        const clip: MediaClip = {
+          id,
+          filePath: `${id}.${ext}`,
+          fileName: file.name,
+          type: info.type,
+          duration: info.duration,
+          width: info.width,
+          height: info.height,
+          format: file.type || ext,
+          thumbnailPath,
+          previewUrl,
+        }
+        store.addClip(clip)
+      } catch (error) {
+        console.error(`Failed to import file: ${file.name}`, error)
+      }
+    }
+  }, [store])
+
+  /** Runs an ffmpeg CLI command (as produced by buildExportCommand) in-browser via ffmpeg.wasm. */
+  const runWebExport = useCallback(async (
+    args: string[],
+    outputFileName: string,
+    onProgress: (ratio: number) => void,
+  ): Promise<Uint8Array> => {
+    const ffmpeg = await loadFFmpeg()
+    setFFmpegProgressCallback(onProgress)
+
+    const usedSourceIds = new Set<string>()
+    for (const tc of [...store.timeline.video, ...store.timeline.audio]) {
+      usedSourceIds.add(tc.sourceClipId)
+    }
+
+    const written: string[] = []
+    try {
+      for (const id of usedSourceIds) {
+        const sourceClip = store.clips.find(c => c.id === id)
+        if (!sourceClip) continue
+        const file = getWebFile(id)
+        if (!file) throw new Error(`"${sourceClip.fileName}" ya no esta disponible en memoria. Vuelve a importarlo.`)
+        await ffmpeg.writeFile(sourceClip.filePath, await fetchFile(file))
+        written.push(sourceClip.filePath)
+      }
+
+      const code = await ffmpeg.exec(args)
+      if (code !== 0) throw new Error(`FFmpeg termino con codigo ${code}`)
+
+      const data = await ffmpeg.readFile(outputFileName)
+      return Uint8Array.from(data as Uint8Array)
+    } finally {
+      setFFmpegProgressCallback(null)
+      for (const path of written) {
+        try { await ffmpeg.deleteFile(path) } catch { /* best effort cleanup */ }
+      }
+    }
+  }, [store])
+
+  const cancelWebExport = useCallback(() => {
+    terminateFFmpeg()
+  }, [])
 
   const addClipToTimeline = useCallback((clip: MediaClip) => {
     const track = clip.type === 'audio' ? 'audio' : 'video'
@@ -283,7 +358,7 @@ export function useFFmpeg() {
     return args
   }, [store])
 
-  return { probeAndImport, addClipToTimeline, buildExportCommand }
+  return { probeAndImport, probeAndImportFiles, addClipToTimeline, buildExportCommand, runWebExport, cancelWebExport }
 }
 
 function evalFrameRate(fpsStr: string): number {

@@ -1,7 +1,9 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
 import { useFFmpeg } from '../hooks/useFFmpeg'
 import type { MediaClip } from '../types/project'
+
+const MEDIA_EXTENSIONS = /\.(mp4|mov|avi|mkv|webm|mp3|wav|aac|flac|m4a)$/i
 
 const isElectron = () => typeof window !== 'undefined' && typeof window.electronAPI !== 'undefined'
 
@@ -58,22 +60,37 @@ function MediaItem({ clip }: { clip: MediaClip }) {
 
 export default function MediaPanel() {
   const store = useProjectStore()
-  const { probeAndImport } = useFFmpeg()
+  const { probeAndImport, probeAndImportFiles } = useFFmpeg()
   const [dragging, setDragging] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement>(null)
 
   const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setDragging(false)
     const files = Array.from(e.dataTransfer.files)
-    // In Electron, File objects have a .path property
-    const paths = files.map(f => (f as File & { path?: string }).path).filter(Boolean) as string[]
-    if (paths.length) probeAndImport(paths)
-  }, [probeAndImport])
+    if (isElectron()) {
+      // In Electron, File objects have a .path property
+      const paths = files.map(f => (f as File & { path?: string }).path).filter(Boolean) as string[]
+      if (paths.length) probeAndImport(paths)
+    } else {
+      const mediaFiles = files.filter(f => MEDIA_EXTENSIONS.test(f.name))
+      if (mediaFiles.length) probeAndImportFiles(mediaFiles)
+    }
+  }, [probeAndImport, probeAndImportFiles])
 
   const handleImport = async () => {
-    if (!isElectron()) return
-    const paths = await window.electronAPI.openFileDialog()
-    if (paths.length) probeAndImport(paths)
+    if (isElectron()) {
+      const paths = await window.electronAPI.openFileDialog()
+      if (paths.length) probeAndImport(paths)
+    } else {
+      fileInputRef.current?.click()
+    }
+  }
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files || [])
+    e.target.value = ''
+    if (files.length) probeAndImportFiles(files)
   }
 
   return (
@@ -84,6 +101,17 @@ export default function MediaPanel() {
           {store.clips.length}
         </span>
       </div>
+
+      {!isElectron() && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          accept="video/*,audio/*"
+          style={{ display: 'none' }}
+          onChange={handleFileInputChange}
+        />
+      )}
 
       <div
         className={`media-dropzone dropzone ${dragging ? 'dragging' : ''}`}

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useCallback, useMemo, useState } from 'react'
 import { useProjectStore } from '../store/useProjectStore'
-import type { Effect } from '../types/project'
+import type { Effect, MediaClip } from '../types/project'
 
 function formatTimecode(seconds: number): string {
   if (!isFinite(seconds) || seconds < 0) seconds = 0
@@ -15,6 +15,11 @@ function toFileUrl(filePath: string): string {
   if (filePath.startsWith('file://')) return filePath
   const normalized = filePath.replace(/\\/g, '/')
   return normalized.startsWith('/') ? `file://${normalized}` : `file:///${normalized}`
+}
+
+/** Web-imported clips carry a blob: preview URL instead of a real filesystem path. */
+function resolveMediaSrc(clip: Pick<MediaClip, 'filePath' | 'previewUrl'>): string {
+  return clip.previewUrl ?? toFileUrl(clip.filePath)
 }
 
 /** Build CSS filter string from active effects (for live preview) */
@@ -97,7 +102,7 @@ function AudioTrackPlayer({ tc }: { tc: TimelineClip }) {
 
   useEffect(() => {
     if (sourceClip?.filePath) {
-      setSrc(toFileUrl(sourceClip.filePath))
+      setSrc(resolveMediaSrc(sourceClip))
     }
   }, [sourceClip])
 
@@ -178,7 +183,7 @@ export default function PreviewPlayer() {
           activeVideo = activeId === 'A' ? videoA.current : videoB.current
           loadedClips.current[activeId] = activeClip.id
           if (activeVideo) {
-            activeVideo.src = toFileUrl(source.filePath)
+            activeVideo.src = resolveMediaSrc(source)
           }
         }
       }
@@ -191,7 +196,7 @@ export default function PreviewPlayer() {
         loadedClips.current[otherId] = nextClip.id
         const source = state.clips.find(c => c.id === nextClip.sourceClipId)
         if (otherVideo && source) {
-          otherVideo.src = toFileUrl(source.filePath)
+          otherVideo.src = resolveMediaSrc(source)
           otherVideo.currentTime = nextClip.trimStart
           otherVideo.pause()
         }

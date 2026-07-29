@@ -22,6 +22,7 @@ export type MediaType = 'video' | 'audio'
 
 export interface MediaClip {
   id: string
+  /** Electron: absolute OS path. Web: virtual ffmpeg.wasm filename (e.g. "abc123.mp4"). */
   filePath: string
   fileName: string
   type: MediaType
@@ -36,6 +37,8 @@ export interface MediaClip {
   videoCodec?: string
   sampleRate?: number
   channels?: number
+  /** Web only: blob: URL used as <video>/<audio> src for preview. */
+  previewUrl?: string
 }
 
 export interface TimelineClip {

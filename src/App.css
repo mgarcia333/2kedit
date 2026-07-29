@@ -52,6 +52,7 @@
 .topbar-spacer { flex: 1; }
 .topbar-actions { display: flex; gap: 2px; align-items: center; }
 .window-controls { display: flex; gap: 2px; margin-left: 6px; }
+.topbar-download { margin-left: 10px; text-decoration: none; white-space: nowrap; }
 .win-btn {
   width: 20px; height: 20px; border-radius: 0;
   background: var(--bg-surface); color: var(--text-primary); cursor: url('/cursor-hand.svg') 6 1, pointer;

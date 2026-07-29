@@ -26,3 +26,8 @@ nsis:
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: 2kedit
+  artifactName: 2kedit-Setup.exe
+publish:
+  provider: github
+  owner: mgarcia333
+  repo: 2kedit

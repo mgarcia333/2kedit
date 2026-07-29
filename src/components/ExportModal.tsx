@@ -11,15 +11,22 @@ function parseFFmpegProgress(output: string, durationSec: number): number {
   return durationSec > 0 ? Math.min(100, (elapsed / durationSec) * 100) : 0
 }
 
+function mimeForFormat(format: 'mp4' | 'mov' | 'webm'): string {
+  if (format === 'webm') return 'video/webm'
+  if (format === 'mov') return 'video/quicktime'
+  return 'video/mp4'
+}
+
 export default function ExportModal({ onClose }: ExportModalProps) {
   const store = useProjectStore()
-  const { buildExportCommand } = useFFmpeg()
+  const { buildExportCommand, runWebExport, cancelWebExport } = useFFmpeg()
   const [isExporting, setIsExporting] = useState(false)
   const [progress, setProgress] = useState(0)
   const [statusText, setStatusText] = useState('')
   const [done, setDone] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [outputPath, setOutputPath] = useState<string | null>(null)
+  const [downloadUrl, setDownloadUrl] = useState<string | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
 
   const { exportSettings } = store
@@ -33,8 +40,13 @@ export default function ExportModal({ onClose }: ExportModalProps) {
     }
   }, [])
 
-  const handleExport = async () => {
-    if (!isElec) { setError('Solo disponible en la app de escritorio'); return }
+  // Release the export's blob URL once it's replaced or the modal unmounts.
+  useEffect(() => {
+    if (!downloadUrl) return
+    return () => URL.revokeObjectURL(downloadUrl)
+  }, [downloadUrl])
+
+  const handleExportElectron = async () => {
     let folder = exportSettings.outputFolder
     if (!folder) {
       const f = await window.electronAPI.openFolderDialog()
@@ -68,8 +80,36 @@ export default function ExportModal({ onClose }: ExportModalProps) {
     }
   }
 
+  const handleExportWeb = async () => {
+    const args = buildExportCommand(exportSettings.fileName)
+    if (!args) { setError('Sin clips en el timeline'); return }
+
+    setIsExporting(true); setProgress(0); setError(null); setDone(false); setDownloadUrl(null)
+    setStatusText('Cargando motor de video (primera vez puede tardar)...')
+
+    try {
+      const data = await runWebExport(args, exportSettings.fileName, ratio => {
+        setProgress(Math.round(ratio * 100))
+        setStatusText(`Procesando... ${Math.round(ratio * 100)}%`)
+      })
+      // Cast needed: TS's lib.dom types Uint8Array as generic over ArrayBufferLike,
+      // which no longer structurally matches BlobPart, even though this is always a
+      // plain ArrayBuffer-backed view at runtime.
+      const blob = new Blob([data as BlobPart], { type: mimeForFormat(exportSettings.format) })
+      setDownloadUrl(URL.createObjectURL(blob))
+      setProgress(100); setDone(true)
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
+  const handleExport = () => { isElec ? handleExportElectron() : handleExportWeb() }
+
   const handleCancel = async () => {
     if (isElec) await window.electronAPI.cancelFFmpeg()
+    else cancelWebExport()
     cleanupRef.current?.()
     setIsExporting(false); setProgress(0)
   }
@@ -134,17 +174,24 @@ export default function ExportModal({ onClose }: ExportModalProps) {
               <input type="text" value={exportSettings.fileName} style={{ width: '100%' }}
                 onChange={e => store.setExportSettings({ fileName: e.target.value })} />
             </div>
-            <div className="export-option-group">
-              <div className="export-option-label">Carpeta</div>
-              <div className="export-file-row">
-                <input type="text" value={exportSettings.outputFolder} style={{ flex: 1 }}
-                  placeholder="Selecciona carpeta..." readOnly />
-                <button className="btn btn-ghost" onClick={async () => {
-                  const f = await window.electronAPI.openFolderDialog()
-                  if (f) store.setExportSettings({ outputFolder: f })
-                }}>Abrir</button>
+            {isElec && (
+              <div className="export-option-group">
+                <div className="export-option-label">Carpeta</div>
+                <div className="export-file-row">
+                  <input type="text" value={exportSettings.outputFolder} style={{ flex: 1 }}
+                    placeholder="Selecciona carpeta..." readOnly />
+                  <button className="btn btn-ghost" onClick={async () => {
+                    const f = await window.electronAPI.openFolderDialog()
+                    if (f) store.setExportSettings({ outputFolder: f })
+                  }}>Abrir</button>
+                </div>
               </div>
-            </div>
+            )}
+            {!isElec && (
+              <div style={{ fontSize: 10, color: 'var(--text-dim)', padding: '4px 10px' }}>
+                El archivo se procesa en tu navegador y se descarga al terminar.
+              </div>
+            )}
             {error && (
               <div style={{ color: 'var(--danger)', fontSize: 11, padding: '8px 10px', background: 'rgba(180,60,60,0.1)', borderRadius: 4 }}>
                 {error}
@@ -172,19 +219,32 @@ export default function ExportModal({ onClose }: ExportModalProps) {
           </div>
         )}
 
-        {done && (
+        {done && isElec && (
           <div className="modal-body" style={{ paddingTop: 0 }}>
             <div style={{ display: 'flex', gap: 7 }}>
               <button className="btn btn-ghost" onClick={() => {
-                if (outputPath && isElec) {
+                if (outputPath) {
                   const folder = outputPath.split('\\').slice(0, -1).join('\\')
                   window.electronAPI.openFolder(folder)
                 }
               }}>Abrir carpeta</button>
               <button className="btn btn-primary" onClick={() => {
-                if (outputPath && isElec) window.electronAPI.openFile(outputPath)
+                if (outputPath) window.electronAPI.openFile(outputPath)
               }}>Reproducir</button>
             </div>
+          </div>
+        )}
+
+        {done && !isElec && downloadUrl && (
+          <div className="modal-body" style={{ paddingTop: 0 }}>
+            <a
+              className="btn btn-primary"
+              style={{ display: 'inline-block', textDecoration: 'none', textAlign: 'center' }}
+              href={downloadUrl}
+              download={exportSettings.fileName}
+            >
+              Descargar {exportSettings.fileName}
+            </a>
           </div>
         )}
 
@@ -195,7 +255,7 @@ export default function ExportModal({ onClose }: ExportModalProps) {
             ) : (
               <>
                 <button className="btn btn-ghost" onClick={onClose}>Cancelar</button>
-                <button className="btn btn-primary" onClick={handleExport} disabled={!exportSettings.outputFolder}>
+                <button className="btn btn-primary" onClick={handleExport} disabled={isElec && !exportSettings.outputFolder}>
                   Exportar
                 </button>
               </>
