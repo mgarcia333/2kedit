@@ -183,7 +183,7 @@ export default function TopBar({ onExport }: TopBarProps) {
         <button className="btn btn-ghost" onClick={handleLoad} title="Cargar Proyecto">
           Cargar
         </button>
-        <button className="btn btn-ghost" onClick={handleSave} title="Guardar Proyecto" style={{ color: 'var(--accent)', borderColor: 'var(--accent)' }}>
+        <button className="btn btn-ghost" onClick={handleSave} title="Guardar Proyecto" style={{ background: 'var(--accent)', color: 'var(--accent-text)', borderColor: 'var(--accent)' }}>
           Guardar
         </button>
 
@@ -228,7 +228,7 @@ export default function TopBar({ onExport }: TopBarProps) {
       {!isElectron() && (
         <a
           className="btn btn-primary topbar-download"
-          href="https://github.com/mgarcia333/2kedit/releases/latest/download/2kedit-Setup.exe"
+          href="https://github.com/mgarcia333/2kedit/releases"
           title="Descargar 2kedit para Windows"
         >
           Descargar

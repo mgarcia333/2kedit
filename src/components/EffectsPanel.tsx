@@ -179,7 +179,7 @@ export default function EffectsPanel() {
   if (!selectedClip) {
     return (
       <div className="effects-panel">
-        <div className="panel-header" style={{ color: 'var(--accent)' }}>Efectos Globales</div>
+        <div className="panel-header">Efectos Globales</div>
         <div className="effects-section">
           <div className="effects-section-title">Resolucion y Cintas Negras</div>
           <div style={{ fontSize: 11, color: 'var(--text-dim)', marginBottom: 12 }}>
