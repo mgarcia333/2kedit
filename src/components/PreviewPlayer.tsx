@@ -567,7 +567,7 @@ export default function PreviewPlayer() {
             <div className="preview-hero">
               <div className="preview-hero-content">
                 <div className="preview-hero-kicker">2KEDIT // EDITOR DE VIDEO</div>
-                <h1 className="preview-hero-title">EDITA VIDEO<br />EN TU NAVEGADOR</h1>
+                <h1 className="preview-hero-title">EDITA VIDEOS<br />EN TU NAVEGADOR</h1>
                 <p className="preview-hero-desc">
                   Corta, aplica efectos cinematograficos y exporta tu video. Sin instalar nada — todo corre aqui mismo.
                 </p>
